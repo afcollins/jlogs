@@ -50,4 +50,4 @@ Produces a JSON summary grouped by severity (info, warning, error, fatal) with:
 
 ---
 
-*Go rewrite of the original Python implementation by Gabriel Meghnagi*
+*AI-Assisted Go rewrite of the original Python implementation by Gabriel Meghnagi*
