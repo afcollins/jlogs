@@ -15,6 +15,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gmeghnag/jlogs/internal/parser"
 )
@@ -23,7 +27,18 @@ func main() {
 	lastN := flag.Int("last-n", 5, "number of most recent occurrences to retain per source (1-10)")
 	firstN := flag.Int("first-n", 1, "number of first occurrences to retain per source (1-10)")
 	pretty := flag.Bool("pretty", true, "pretty-print the JSON output")
+	since := flag.String("since", "", "filter logs from last N time units (e.g., \"1 hour\", \"2 days\", \"30 minutes\")")
 	flag.Parse()
+
+	var sinceDuration time.Duration
+	if *since != "" {
+		var err error
+		sinceDuration, err = parseSince(*since)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "jlogs: invalid --since value: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
 	// Build the input reader: either stdin or the concatenation of file args.
 	// MultiReader lets us stream without buffering everything in memory.
@@ -38,7 +53,7 @@ func main() {
 		}
 	}()
 
-	p, err := parser.New(*lastN, *firstN)
+	p, err := parser.New(*lastN, *firstN, sinceDuration)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "jlogs: %v\n", err)
 		os.Exit(1)
@@ -82,4 +97,32 @@ func openInputs(paths []string) (io.Reader, []io.Closer, error) {
 		closers = append(closers, f)
 	}
 	return io.MultiReader(readers...), closers, nil
+}
+
+// parseSince parses a duration string like "1 hour", "2 days", "30 minutes".
+// Supports: minute(s), hour(s), day(s).
+func parseSince(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	re := regexp.MustCompile(`^(\d+)\s+(minute|minutes|hour|hours|day|days)$`)
+	matches := re.FindStringSubmatch(s)
+	if matches == nil {
+		return 0, fmt.Errorf("invalid format, expected \"N unit\" (e.g., \"1 hour\", \"2 days\")")
+	}
+
+	num, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return 0, fmt.Errorf("invalid number: %w", err)
+	}
+
+	unit := matches[2]
+	switch unit {
+	case "minute", "minutes":
+		return time.Duration(num) * time.Minute, nil
+	case "hour", "hours":
+		return time.Duration(num) * time.Hour, nil
+	case "day", "days":
+		return time.Duration(num) * 24 * time.Hour, nil
+	default:
+		return 0, fmt.Errorf("unsupported unit: %s", unit)
+	}
 }

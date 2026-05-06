@@ -40,6 +40,7 @@ jlogs -first-n 2 -last-n 10 -pretty=false app.log
 ### Options
 - `-last-n`: Number of recent occurrences to retain per source (1-10, default: 5)
 - `-first-n`: Number of first occurrences to retain per source (1-10, default: 1)
+- `-since`: Filter logs from last N time units (e.g., "1 hour", "2 days", "30 minutes")
 - `-pretty`: Pretty-print JSON output (default: true)
 
 ## Output

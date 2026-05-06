@@ -3,10 +3,11 @@ package parser
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseKlogLine(t *testing.T) {
-	p, err := New(5, 1)
+	p, err := New(5, 1, 0)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -31,7 +32,7 @@ func TestParseKlogLine(t *testing.T) {
 }
 
 func TestParseJSONLine(t *testing.T) {
-	p, _ := New(5, 1)
+	p, _ := New(5, 1, 0)
 	line := `2024-12-30T10:46:29.390512670Z {"level":"error","caller":"foo.go:42","msg":"boom","error":"bad thing"}`
 	p.parseLine(line)
 
@@ -65,7 +66,7 @@ func TestSeverityAliases(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.level, func(t *testing.T) {
-			p, _ := New(5, 1)
+			p, _ := New(5, 1, 0)
 			line := `2024-12-30T10:46:29.390512670Z {"level":"` + tc.level + `","caller":"x.go:1","msg":"m"}`
 			p.parseLine(line)
 			if got := len(p.Summary()[tc.want]); got != 1 {
@@ -76,7 +77,7 @@ func TestSeverityAliases(t *testing.T) {
 }
 
 func TestRingOverflow(t *testing.T) {
-	p, _ := New(3, 1)
+	p, _ := New(3, 1, 0)
 	for i := 0; i < 10; i++ {
 		line := `2024-12-30T10:46:29.390512670Z I1230 10:46:29.390512       1 a.go:1] msg`
 		p.parseLine(line)
@@ -91,7 +92,7 @@ func TestRingOverflow(t *testing.T) {
 }
 
 func TestMalformedJSONIsSkipped(t *testing.T) {
-	p, _ := New(5, 1)
+	p, _ := New(5, 1, 0)
 	// Bad JSON should not crash or pollute output.
 	bad := `2024-12-30T10:46:29.390512670Z {not valid json}`
 	good := `2024-12-30T10:46:29.390512670Z {"level":"info","caller":"x.go:1","msg":"ok"}`
@@ -105,7 +106,7 @@ func TestMalformedJSONIsSkipped(t *testing.T) {
 }
 
 func TestUnrecognizedLineIsSkipped(t *testing.T) {
-	p, _ := New(5, 1)
+	p, _ := New(5, 1, 0)
 	r := strings.NewReader("this is not a structured log line\n")
 	if err := p.Consume(r); err != nil {
 		t.Fatalf("Consume: %v", err)
@@ -119,7 +120,7 @@ func TestUnrecognizedLineIsSkipped(t *testing.T) {
 
 func TestNewClampsLastN(t *testing.T) {
 	for _, n := range []int{0, -1, 11, 999} {
-		p, err := New(n, 1)
+		p, err := New(n, 1, 0)
 		if err != nil {
 			t.Fatalf("New(%d, 1): %v", n, err)
 		}
@@ -132,7 +133,7 @@ func TestNewClampsLastN(t *testing.T) {
 func TestRecentKeyMatchesLastN(t *testing.T) {
 	cases := []int{1, 3, 5, 10}
 	for _, n := range cases {
-		p, _ := New(n, 1)
+		p, _ := New(n, 1, 0)
 		if p.recentKey != "last_occurrences" {
 			t.Errorf("New(%d, 1) recentKey = %q, want %q", n, p.recentKey, "last_occurrences")
 		}
@@ -141,7 +142,7 @@ func TestRecentKeyMatchesLastN(t *testing.T) {
 
 func TestNewClampsFirstN(t *testing.T) {
 	for _, n := range []int{0, -1, 11, 999} {
-		p, err := New(5, n)
+		p, err := New(5, n, 0)
 		if err != nil {
 			t.Fatalf("New(5, %d): %v", n, err)
 		}
@@ -152,7 +153,7 @@ func TestNewClampsFirstN(t *testing.T) {
 }
 
 func TestFirstOccurrences(t *testing.T) {
-	p, _ := New(3, 2)
+	p, _ := New(3, 2, 0)
 	// Add 5 occurrences of the same log line
 	for i := 0; i < 5; i++ {
 		line := `2024-12-30T10:46:29.390512670Z I1230 10:46:29.390512       1 test.go:10] msg`
@@ -300,7 +301,7 @@ func TestFrequencyCalculation(t *testing.T) {
 }
 
 func TestFrequencyInSummary(t *testing.T) {
-	p, _ := New(5, 1)
+	p, _ := New(5, 1, 0)
 
 	// Add logs with different timestamps
 	lines := []string{
@@ -325,5 +326,109 @@ func TestFrequencyInSummary(t *testing.T) {
 	// 5 occurrences over 4 seconds = 1.25/s, which rounds to 1/s
 	if entry.Frequency != "1/s" {
 		t.Errorf("frequency = %q, want %q", entry.Frequency, "1/s")
+	}
+}
+
+func TestSinceFiltering(t *testing.T) {
+	// Create parser with 1 hour since filter
+	p, _ := New(5, 1, 1*time.Hour)
+
+	lines := []string{
+		// Old logs (> 1 hour before latest)
+		`2024-12-30T10:00:00.000000000Z I1230 10:00:00.000000       1 test.go:1] old1`,
+		`2024-12-30T10:30:00.000000000Z I1230 10:30:00.000000       1 test.go:1] old2`,
+		// Recent logs (within 1 hour of latest)
+		`2024-12-30T11:30:00.000000000Z I1230 11:30:00.000000       1 test.go:1] recent1`,
+		`2024-12-30T12:00:00.000000000Z I1230 12:00:00.000000       1 test.go:1] recent2`,
+		`2024-12-30T12:15:00.000000000Z I1230 12:15:00.000000       1 test.go:1] recent3`,
+	}
+
+	for _, line := range lines {
+		p.parseLine(line)
+	}
+
+	summary := p.Summary()
+	entries := summary["info"]
+
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 source, got %d", len(entries))
+	}
+
+	entry := entries[0]
+	// Should only have 3 recent logs (within 1 hour of 12:15:00)
+	if entry.Occurrences != 3 {
+		t.Errorf("occurrences = %d, want 3", entry.Occurrences)
+	}
+
+	// Check that we only have recent logs
+	allLogs := append(entry.First, entry.Recent...)
+	for _, occ := range allLogs {
+		if strings.Contains(occ.Log.(string), "old") {
+			t.Errorf("found old log that should be filtered: %v", occ.Log)
+		}
+	}
+}
+
+func TestSinceFilteringMultipleSources(t *testing.T) {
+	p, _ := New(5, 1, 30*time.Minute)
+
+	lines := []string{
+		// source1: has both old and recent logs
+		`2024-12-30T10:00:00.000000000Z I1230 10:00:00.000000       1 source1.go:1] msg`,
+		`2024-12-30T10:45:00.000000000Z I1230 10:45:00.000000       1 source1.go:1] msg`,
+		// source2: only old logs (should be filtered out)
+		`2024-12-30T10:00:00.000000000Z W1230 10:00:00.000000       1 source2.go:1] msg`,
+		`2024-12-30T10:10:00.000000000Z W1230 10:10:00.000000       1 source2.go:1] msg`,
+		// Latest log (defines cutoff point)
+		`2024-12-30T11:00:00.000000000Z E1230 11:00:00.000000       1 source3.go:1] msg`,
+	}
+
+	for _, line := range lines {
+		p.parseLine(line)
+	}
+
+	summary := p.Summary()
+
+	// source1 should have 1 occurrence (only the 10:45 log is within 30 min of 11:00)
+	if len(summary["info"]) != 1 {
+		t.Errorf("info sources = %d, want 1", len(summary["info"]))
+	}
+	if summary["info"][0].Occurrences != 1 {
+		t.Errorf("source1 occurrences = %d, want 1", summary["info"][0].Occurrences)
+	}
+
+	// source2 should be completely filtered out (all logs > 30 min old)
+	if len(summary["warning"]) != 0 {
+		t.Errorf("warning sources = %d, want 0 (should be filtered)", len(summary["warning"]))
+	}
+
+	// source3 should have 1 occurrence
+	if len(summary["error"]) != 1 {
+		t.Errorf("error sources = %d, want 1", len(summary["error"]))
+	}
+	if summary["error"][0].Occurrences != 1 {
+		t.Errorf("source3 occurrences = %d, want 1", summary["error"][0].Occurrences)
+	}
+}
+
+func TestSinceNoFilter(t *testing.T) {
+	// Parser with no since filter (0 duration)
+	p, _ := New(5, 1, 0)
+
+	lines := []string{
+		`2024-12-30T10:00:00.000000000Z I1230 10:00:00.000000       1 test.go:1] msg1`,
+		`2024-12-30T12:00:00.000000000Z I1230 12:00:00.000000       1 test.go:1] msg2`,
+	}
+
+	for _, line := range lines {
+		p.parseLine(line)
+	}
+
+	summary := p.Summary()
+	entry := summary["info"][0]
+
+	// Should have both occurrences (no filtering)
+	if entry.Occurrences != 2 {
+		t.Errorf("occurrences = %d, want 2 (no filter)", entry.Occurrences)
 	}
 }

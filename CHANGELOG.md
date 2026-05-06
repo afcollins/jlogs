@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **2026-05-06**: New `--since` flag to filter logs by time window
+  - Filters logs from the last N time units relative to the latest log timestamp
+  - Supports: minute(s), hour(s), day(s)
+  - Examples: `--since "1 hour"`, `--since "2 days"`, `--since "30 minutes"`
+  - Recalculates occurrence counts and frequencies based on filtered time window
+  - Sources with no occurrences after filtering are omitted from output
+
 ### Fixed
 - **2026-05-06**: Frequency calculation now requires minimum 1-second duration to avoid misleading rates from startup bursts
   - Previously, logs occurring in milliseconds (e.g., 57 logs in 4ms) would show unrealistic frequencies like "13154/s"

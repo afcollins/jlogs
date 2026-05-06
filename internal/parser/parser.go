@@ -107,10 +107,13 @@ var jsonLevelToSeverity = map[string]Severity{
 // Consume, then read the result with Summary. A Parser is not safe for
 // concurrent use; create one per goroutine if you need parallelism.
 type Parser struct {
-	lastN     int
-	firstN    int
-	recentKey string
-	firstKey  string
+	lastN          int
+	firstN         int
+	recentKey      string
+	firstKey       string
+	since          time.Duration // filter logs to last N duration from latest timestamp
+	latestTime     time.Time     // latest timestamp seen during parsing
+	hasLatestTime  bool          // whether we've seen any valid timestamps
 	// buckets[severity][source] -> aggregator
 	buckets map[Severity]map[string]*sourceAggregator
 }
@@ -128,7 +131,8 @@ type sourceAggregator struct {
 
 // New constructs a Parser. lastN and firstN must be in the range [1, 10];
 // values outside that range fall back to 5 and 1 respectively.
-func New(lastN, firstN int) (*Parser, error) {
+// since filters logs to only include those from the last N duration relative to the latest log.
+func New(lastN, firstN int, since time.Duration) (*Parser, error) {
 	if lastN < 1 || lastN > 10 {
 		lastN = 5
 	}
@@ -138,6 +142,7 @@ func New(lastN, firstN int) (*Parser, error) {
 	p := &Parser{
 		lastN:     lastN,
 		firstN:    firstN,
+		since:     since,
 		recentKey: "last_occurrences",
 		firstKey:  "first_occurrences",
 		buckets:   make(map[Severity]map[string]*sourceAggregator, len(trackedSeverities)),
@@ -230,6 +235,15 @@ func (p *Parser) addEntry(sev Severity, source, timestamp string, message any) {
 		// Severity isn't tracked; drop. This happens for "unknown" levels.
 		return
 	}
+
+	// Track the latest timestamp seen
+	if t, err := time.Parse(time.RFC3339Nano, timestamp); err == nil {
+		if !p.hasLatestTime || t.After(p.latestTime) {
+			p.latestTime = t
+			p.hasLatestTime = true
+		}
+	}
+
 	agg, ok := bucket[source]
 	if !ok {
 		agg = &sourceAggregator{
