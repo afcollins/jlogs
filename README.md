@@ -34,11 +34,12 @@ cat app.log | jlogs
 jlogs app.log error.log
 
 # Customize output
-jlogs -last-n 10 -pretty=false app.log
+jlogs -first-n 2 -last-n 10 -pretty=false app.log
 ```
 
 ### Options
 - `-last-n`: Number of recent occurrences to retain per source (1-10, default: 5)
+- `-first-n`: Number of first occurrences to retain per source (1-10, default: 1)
 - `-pretty`: Pretty-print JSON output (default: true)
 
 ## Output
@@ -46,6 +47,7 @@ jlogs -last-n 10 -pretty=false app.log
 Produces a JSON summary grouped by severity (info, warning, error, fatal) with:
 - Source file and line number
 - Total occurrence count
+- First N log entries
 - Most recent N log entries
 
 ---

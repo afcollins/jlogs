@@ -21,6 +21,7 @@ import (
 
 func main() {
 	lastN := flag.Int("last-n", 5, "number of most recent occurrences to retain per source (1-10)")
+	firstN := flag.Int("first-n", 1, "number of first occurrences to retain per source (1-10)")
 	pretty := flag.Bool("pretty", true, "pretty-print the JSON output")
 	flag.Parse()
 
@@ -37,7 +38,7 @@ func main() {
 		}
 	}()
 
-	p, err := parser.New(*lastN)
+	p, err := parser.New(*lastN, *firstN)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "jlogs: %v\n", err)
 		os.Exit(1)

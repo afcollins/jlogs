@@ -6,21 +6,6 @@ import (
 	"sort"
 )
 
-// numToWord matches the Python original's mapping; preserved for output-key
-// compatibility ("last_five_occurrences", etc.).
-var numToWord = map[int]string{
-	1:  "one",
-	2:  "two",
-	3:  "three",
-	4:  "four",
-	5:  "five",
-	6:  "six",
-	7:  "seven",
-	8:  "eight",
-	9:  "nine",
-	10: "ten",
-}
-
 // Summary is the top-level shape returned to callers. Map keys are severity
 // names; values are the per-source aggregations. Severities with zero entries
 // are still present (as empty slices) so downstream consumers can rely on the
@@ -41,7 +26,9 @@ func (p *Parser) Summary() Summary {
 				Source:      source,
 				Occurrences: agg.occurrences,
 				Recent:      agg.recent.snapshot(),
+				First:       agg.first,
 				recentKey:   p.recentKey,
+				firstKey:    p.firstKey,
 			})
 		}
 		sort.Slice(entries, func(i, j int) bool {

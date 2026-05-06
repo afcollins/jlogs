@@ -6,7 +6,7 @@ import (
 )
 
 func TestParseKlogLine(t *testing.T) {
-	p, err := New(5)
+	p, err := New(5, 1)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestParseKlogLine(t *testing.T) {
 }
 
 func TestParseJSONLine(t *testing.T) {
-	p, _ := New(5)
+	p, _ := New(5, 1)
 	line := `2024-12-30T10:46:29.390512670Z {"level":"error","caller":"foo.go:42","msg":"boom","error":"bad thing"}`
 	p.parseLine(line)
 
@@ -65,7 +65,7 @@ func TestSeverityAliases(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.level, func(t *testing.T) {
-			p, _ := New(5)
+			p, _ := New(5, 1)
 			line := `2024-12-30T10:46:29.390512670Z {"level":"` + tc.level + `","caller":"x.go:1","msg":"m"}`
 			p.parseLine(line)
 			if got := len(p.Summary()[tc.want]); got != 1 {
@@ -76,7 +76,7 @@ func TestSeverityAliases(t *testing.T) {
 }
 
 func TestRingOverflow(t *testing.T) {
-	p, _ := New(3)
+	p, _ := New(3, 1)
 	for i := 0; i < 10; i++ {
 		line := `2024-12-30T10:46:29.390512670Z I1230 10:46:29.390512       1 a.go:1] msg`
 		p.parseLine(line)
@@ -91,7 +91,7 @@ func TestRingOverflow(t *testing.T) {
 }
 
 func TestMalformedJSONIsSkipped(t *testing.T) {
-	p, _ := New(5)
+	p, _ := New(5, 1)
 	// Bad JSON should not crash or pollute output.
 	bad := `2024-12-30T10:46:29.390512670Z {not valid json}`
 	good := `2024-12-30T10:46:29.390512670Z {"level":"info","caller":"x.go:1","msg":"ok"}`
@@ -105,7 +105,7 @@ func TestMalformedJSONIsSkipped(t *testing.T) {
 }
 
 func TestUnrecognizedLineIsSkipped(t *testing.T) {
-	p, _ := New(5)
+	p, _ := New(5, 1)
 	r := strings.NewReader("this is not a structured log line\n")
 	if err := p.Consume(r); err != nil {
 		t.Fatalf("Consume: %v", err)
@@ -119,26 +119,56 @@ func TestUnrecognizedLineIsSkipped(t *testing.T) {
 
 func TestNewClampsLastN(t *testing.T) {
 	for _, n := range []int{0, -1, 11, 999} {
-		p, err := New(n)
+		p, err := New(n, 1)
 		if err != nil {
-			t.Fatalf("New(%d): %v", n, err)
+			t.Fatalf("New(%d, 1): %v", n, err)
 		}
 		if p.lastN != 5 {
-			t.Errorf("New(%d) lastN = %d, want 5 fallback", n, p.lastN)
+			t.Errorf("New(%d, 1) lastN = %d, want 5 fallback", n, p.lastN)
 		}
 	}
 }
 
 func TestRecentKeyMatchesLastN(t *testing.T) {
-	cases := map[int]string{
-		1: "last_one_occurrences",
-		3: "last_three_occurrences",
-		5: "last_five_occurrences",
-	}
-	for n, want := range cases {
-		p, _ := New(n)
-		if p.recentKey != want {
-			t.Errorf("New(%d) recentKey = %q, want %q", n, p.recentKey, want)
+	cases := []int{1, 3, 5, 10}
+	for _, n := range cases {
+		p, _ := New(n, 1)
+		if p.recentKey != "last_occurrences" {
+			t.Errorf("New(%d, 1) recentKey = %q, want %q", n, p.recentKey, "last_occurrences")
 		}
+	}
+}
+
+func TestNewClampsFirstN(t *testing.T) {
+	for _, n := range []int{0, -1, 11, 999} {
+		p, err := New(5, n)
+		if err != nil {
+			t.Fatalf("New(5, %d): %v", n, err)
+		}
+		if p.firstN != 1 {
+			t.Errorf("New(5, %d) firstN = %d, want 1 fallback", n, p.firstN)
+		}
+	}
+}
+
+func TestFirstOccurrences(t *testing.T) {
+	p, _ := New(3, 2)
+	// Add 5 occurrences of the same log line
+	for i := 0; i < 5; i++ {
+		line := `2024-12-30T10:46:29.390512670Z I1230 10:46:29.390512       1 test.go:10] msg`
+		p.parseLine(line)
+	}
+
+	entry := p.Summary()["info"][0]
+	if entry.Occurrences != 5 {
+		t.Errorf("occurrences = %d, want 5", entry.Occurrences)
+	}
+	// Should only keep first 2
+	if len(entry.First) != 2 {
+		t.Errorf("first occurrences len = %d, want 2", len(entry.First))
+	}
+	// Should keep last 3
+	if len(entry.Recent) != 3 {
+		t.Errorf("recent occurrences len = %d, want 3", len(entry.Recent))
 	}
 }

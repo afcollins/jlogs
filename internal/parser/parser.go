@@ -51,18 +51,19 @@ type Occurrence struct {
 type SourceSummary struct {
 	Source      string       `json:"source_filename_linenumber"`
 	Occurrences int          `json:"occurrences"`
-	Recent      []Occurrence `json:"-"` // rendered under a dynamic key; see MarshalJSON
-	recentKey   string       // e.g. "last_five_occurrences"
+	Recent      []Occurrence `json:"-"` // rendered under "last_occurrences" key; see MarshalJSON
+	First       []Occurrence `json:"-"` // rendered under "first_occurrences" key; see MarshalJSON
+	recentKey   string       // "last_occurrences"
+	firstKey    string       // "first_occurrences"
 }
 
-// MarshalJSON renders SourceSummary with the dynamic "last_N_occurrences" key.
-// We keep the dynamic key for output compatibility with the original Python
-// implementation, but isolate the awkwardness to this one method.
+// MarshalJSON renders SourceSummary with the "last_occurrences" and "first_occurrences" keys.
 func (s SourceSummary) MarshalJSON() ([]byte, error) {
-	// Build a map so we can place the dynamic key alongside the static fields.
+	// Build a map so we can place the dynamic keys alongside the static fields.
 	out := map[string]any{
 		"source_filename_linenumber": s.Source,
 		"occurrences":                s.Occurrences,
+		s.firstKey:                   s.First,
 		s.recentKey:                  s.Recent,
 	}
 	return jsonMarshal(out)
@@ -101,31 +102,36 @@ var jsonLevelToSeverity = map[string]Severity{
 // concurrent use; create one per goroutine if you need parallelism.
 type Parser struct {
 	lastN     int
+	firstN    int
 	recentKey string
+	firstKey  string
 	// buckets[severity][source] -> aggregator
 	buckets map[Severity]map[string]*sourceAggregator
 }
 
-// sourceAggregator tracks running counts and a fixed-size ring of recent
-// occurrences for a single (severity, source) pair.
+// sourceAggregator tracks running counts, a fixed-size ring of recent
+// occurrences, and the first N occurrences for a single (severity, source) pair.
 type sourceAggregator struct {
 	occurrences int
 	recent      *ring
+	first       []Occurrence
+	firstCap    int
 }
 
-// New constructs a Parser. lastN must be in the range [1, 10] to match the
-// original Python behavior; values outside that range fall back to 5.
-func New(lastN int) (*Parser, error) {
+// New constructs a Parser. lastN and firstN must be in the range [1, 10];
+// values outside that range fall back to 5 and 1 respectively.
+func New(lastN, firstN int) (*Parser, error) {
 	if lastN < 1 || lastN > 10 {
 		lastN = 5
 	}
-	word, ok := numToWord[lastN]
-	if !ok {
-		return nil, fmt.Errorf("internal: no word form for lastN=%d", lastN)
+	if firstN < 1 || firstN > 10 {
+		firstN = 1
 	}
 	p := &Parser{
 		lastN:     lastN,
-		recentKey: "last_" + word + "_occurrences",
+		firstN:    firstN,
+		recentKey: "last_occurrences",
+		firstKey:  "first_occurrences",
 		buckets:   make(map[Severity]map[string]*sourceAggregator, len(trackedSeverities)),
 	}
 	for _, sev := range trackedSeverities {
@@ -167,9 +173,17 @@ func (p *Parser) addEntry(sev Severity, source, timestamp string, message any) {
 	}
 	agg, ok := bucket[source]
 	if !ok {
-		agg = &sourceAggregator{recent: newRing(p.lastN)}
+		agg = &sourceAggregator{
+			recent:   newRing(p.lastN),
+			first:    make([]Occurrence, 0, p.firstN),
+			firstCap: p.firstN,
+		}
 		bucket[source] = agg
 	}
 	agg.occurrences++
 	agg.recent.push(Occurrence{Time: timestamp, Log: message})
+	// Only collect first N occurrences
+	if len(agg.first) < agg.firstCap {
+		agg.first = append(agg.first, Occurrence{Time: timestamp, Log: message})
+	}
 }
