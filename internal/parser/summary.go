@@ -25,6 +25,7 @@ func (p *Parser) Summary() Summary {
 			entries = append(entries, SourceSummary{
 				Source:      source,
 				Occurrences: agg.occurrences,
+				Frequency:   calculateFrequency(agg.occurrences, agg.firstTimestamp, agg.lastTimestamp),
 				Recent:      agg.recent.snapshot(),
 				First:       agg.first,
 				recentKey:   p.recentKey,

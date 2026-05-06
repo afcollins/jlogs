@@ -47,6 +47,7 @@ jlogs -first-n 2 -last-n 10 -pretty=false app.log
 Produces a JSON summary grouped by severity (info, warning, error, fatal) with:
 - Source file and line number
 - Total occurrence count
+- Frequency (occurrences per time period: X/s, X/m, or X/h)
 - First N log entries
 - Most recent N log entries
 

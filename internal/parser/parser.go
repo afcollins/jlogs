@@ -18,8 +18,10 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"math"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Severity is the canonical severity bucket for an entry. Using a typed string
@@ -51,8 +53,9 @@ type Occurrence struct {
 type SourceSummary struct {
 	Source      string       `json:"source_filename_linenumber"`
 	Occurrences int          `json:"occurrences"`
-	Recent      []Occurrence `json:"-"` // rendered under "last_occurrences" key; see MarshalJSON
-	First       []Occurrence `json:"-"` // rendered under "first_occurrences" key; see MarshalJSON
+	Frequency   string       `json:"frequency,omitempty"` // e.g., "10/s", "5/m", "4/h"
+	Recent      []Occurrence `json:"-"`                   // rendered under "last_occurrences" key; see MarshalJSON
+	First       []Occurrence `json:"-"`                   // rendered under "first_occurrences" key; see MarshalJSON
 	recentKey   string       // "last_occurrences"
 	firstKey    string       // "first_occurrences"
 }
@@ -65,6 +68,9 @@ func (s SourceSummary) MarshalJSON() ([]byte, error) {
 		"occurrences":                s.Occurrences,
 		s.firstKey:                   s.First,
 		s.recentKey:                  s.Recent,
+	}
+	if s.Frequency != "" {
+		out["frequency"] = s.Frequency
 	}
 	return jsonMarshal(out)
 }
@@ -112,10 +118,12 @@ type Parser struct {
 // sourceAggregator tracks running counts, a fixed-size ring of recent
 // occurrences, and the first N occurrences for a single (severity, source) pair.
 type sourceAggregator struct {
-	occurrences int
-	recent      *ring
-	first       []Occurrence
-	firstCap    int
+	occurrences    int
+	recent         *ring
+	first          []Occurrence
+	firstCap       int
+	firstTimestamp string // timestamp of the first occurrence
+	lastTimestamp  string // timestamp of the most recent occurrence
 }
 
 // New constructs a Parser. lastN and firstN must be in the range [1, 10];
@@ -164,6 +172,48 @@ func (p *Parser) Consume(r io.Reader) error {
 	return nil
 }
 
+// calculateFrequency computes the occurrence rate between first and last timestamps.
+// Returns a formatted string like "10/s", "5/m", or "4/h" based on the rate.
+// If there's only one occurrence or timestamps can't be parsed, returns empty string.
+func calculateFrequency(occurrences int, firstTS, lastTS string) string {
+	if occurrences <= 1 || firstTS == "" || lastTS == "" {
+		return ""
+	}
+
+	first, err := time.Parse(time.RFC3339Nano, firstTS)
+	if err != nil {
+		return ""
+	}
+	last, err := time.Parse(time.RFC3339Nano, lastTS)
+	if err != nil {
+		return ""
+	}
+
+	duration := last.Sub(first).Seconds()
+	if duration == 0 {
+		// All occurrences in the same second
+		return fmt.Sprintf("%d/s", occurrences)
+	}
+
+	// Calculate per-second rate
+	perSecond := float64(occurrences) / duration
+
+	// Use seconds if >= 1/s
+	if perSecond >= 1.0 {
+		return fmt.Sprintf("%.0f/s", math.Round(perSecond))
+	}
+
+	// Calculate per-minute rate
+	perMinute := float64(occurrences) / (duration / 60.0)
+	if perMinute >= 1.0 {
+		return fmt.Sprintf("%.0f/m", math.Round(perMinute))
+	}
+
+	// Use per-hour rate
+	perHour := float64(occurrences) / (duration / 3600.0)
+	return fmt.Sprintf("%.0f/h", math.Round(perHour))
+}
+
 // addEntry records one parsed log event under the appropriate severity bucket.
 func (p *Parser) addEntry(sev Severity, source, timestamp string, message any) {
 	bucket, ok := p.buckets[sev]
@@ -174,13 +224,15 @@ func (p *Parser) addEntry(sev Severity, source, timestamp string, message any) {
 	agg, ok := bucket[source]
 	if !ok {
 		agg = &sourceAggregator{
-			recent:   newRing(p.lastN),
-			first:    make([]Occurrence, 0, p.firstN),
-			firstCap: p.firstN,
+			recent:         newRing(p.lastN),
+			first:          make([]Occurrence, 0, p.firstN),
+			firstCap:       p.firstN,
+			firstTimestamp: timestamp,
 		}
 		bucket[source] = agg
 	}
 	agg.occurrences++
+	agg.lastTimestamp = timestamp
 	agg.recent.push(Occurrence{Time: timestamp, Log: message})
 	// Only collect first N occurrences
 	if len(agg.first) < agg.firstCap {

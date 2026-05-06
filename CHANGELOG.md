@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Output key is now always `last_occurrences` for consistency
 
 ### Added
+- **2026-05-06**: Automatic frequency calculation for each log source
+  - Calculates occurrence rate based on time difference between first and last occurrence
+  - Intelligently formats frequency as:
+    - `X/s` (per second) when rate ≥ 1/s
+    - `X/m` (per minute) when rate ≥ 1/m but < 1/s
+    - `X/h` (per hour) when rate < 1/m
+  - Appears in JSON output under the `frequency` field
+  - Example: "10/s", "5/m", "4/h"
 - **2026-05-06**: New `-first-n` flag to track the first N occurrences per source
   - Default value: 1
   - Valid range: 1-10

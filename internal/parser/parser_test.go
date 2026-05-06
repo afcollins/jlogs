@@ -172,3 +172,130 @@ func TestFirstOccurrences(t *testing.T) {
 		t.Errorf("recent occurrences len = %d, want 3", len(entry.Recent))
 	}
 }
+
+func TestFrequencyCalculation(t *testing.T) {
+	tests := []struct {
+		name        string
+		occurrences int
+		firstTS     string
+		lastTS      string
+		want        string
+	}{
+		{
+			name:        "per second - 10 logs in 1 second",
+			occurrences: 10,
+			firstTS:     "2024-12-30T10:46:29.000000000Z",
+			lastTS:      "2024-12-30T10:46:30.000000000Z",
+			want:        "10/s",
+		},
+		{
+			name:        "per second - 120 logs in 60 seconds",
+			occurrences: 120,
+			firstTS:     "2024-12-30T10:46:00.000000000Z",
+			lastTS:      "2024-12-30T10:47:00.000000000Z",
+			want:        "2/s",
+		},
+		{
+			name:        "per hour - 5 logs in 10 minutes (0.5/m rounds to 30/h)",
+			occurrences: 5,
+			firstTS:     "2024-12-30T10:00:00.000000000Z",
+			lastTS:      "2024-12-30T10:10:00.000000000Z",
+			want:        "30/h",
+		},
+		{
+			name:        "per minute - 10 logs in 5 minutes",
+			occurrences: 10,
+			firstTS:     "2024-12-30T10:00:00.000000000Z",
+			lastTS:      "2024-12-30T10:05:00.000000000Z",
+			want:        "2/m",
+		},
+		{
+			name:        "per minute - 30 logs in 15 minutes",
+			occurrences: 30,
+			firstTS:     "2024-12-30T10:00:00.000000000Z",
+			lastTS:      "2024-12-30T10:15:00.000000000Z",
+			want:        "2/m",
+		},
+		{
+			name:        "per hour - 4 logs in 2 hours",
+			occurrences: 4,
+			firstTS:     "2024-12-30T10:00:00.000000000Z",
+			lastTS:      "2024-12-30T12:00:00.000000000Z",
+			want:        "2/h",
+		},
+		{
+			name:        "per hour - 10 logs in 5 hours",
+			occurrences: 10,
+			firstTS:     "2024-12-30T10:00:00.000000000Z",
+			lastTS:      "2024-12-30T15:00:00.000000000Z",
+			want:        "2/h",
+		},
+		{
+			name:        "single occurrence",
+			occurrences: 1,
+			firstTS:     "2024-12-30T10:00:00.000000000Z",
+			lastTS:      "2024-12-30T10:00:00.000000000Z",
+			want:        "",
+		},
+		{
+			name:        "same timestamp - all in same second",
+			occurrences: 5,
+			firstTS:     "2024-12-30T10:00:00.000000000Z",
+			lastTS:      "2024-12-30T10:00:00.000000000Z",
+			want:        "5/s",
+		},
+		{
+			name:        "invalid first timestamp",
+			occurrences: 10,
+			firstTS:     "invalid",
+			lastTS:      "2024-12-30T10:00:00.000000000Z",
+			want:        "",
+		},
+		{
+			name:        "invalid last timestamp",
+			occurrences: 10,
+			firstTS:     "2024-12-30T10:00:00.000000000Z",
+			lastTS:      "invalid",
+			want:        "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := calculateFrequency(tt.occurrences, tt.firstTS, tt.lastTS)
+			if got != tt.want {
+				t.Errorf("calculateFrequency(%d, %q, %q) = %q, want %q",
+					tt.occurrences, tt.firstTS, tt.lastTS, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFrequencyInSummary(t *testing.T) {
+	p, _ := New(5, 1)
+
+	// Add logs with different timestamps
+	lines := []string{
+		`2024-12-30T10:00:00.000000000Z I1230 10:00:00.000000       1 freq.go:1] msg1`,
+		`2024-12-30T10:00:01.000000000Z I1230 10:00:01.000000       1 freq.go:1] msg2`,
+		`2024-12-30T10:00:02.000000000Z I1230 10:00:02.000000       1 freq.go:1] msg3`,
+		`2024-12-30T10:00:03.000000000Z I1230 10:00:03.000000       1 freq.go:1] msg4`,
+		`2024-12-30T10:00:04.000000000Z I1230 10:00:04.000000       1 freq.go:1] msg5`,
+	}
+
+	for _, line := range lines {
+		p.parseLine(line)
+	}
+
+	summary := p.Summary()
+	entry := summary["info"][0]
+
+	if entry.Occurrences != 5 {
+		t.Errorf("occurrences = %d, want 5", entry.Occurrences)
+	}
+
+	// 5 occurrences over 4 seconds = 1.25/s, which rounds to 1/s
+	if entry.Frequency != "1/s" {
+		t.Errorf("frequency = %q, want %q", entry.Frequency, "1/s")
+	}
+}
