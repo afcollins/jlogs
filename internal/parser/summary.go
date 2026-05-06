@@ -41,16 +41,23 @@ func (p *Parser) Summary() Summary {
 			// Apply time filter if --since is specified
 			if applySinceFilter {
 				// Calculate the true occurrence count by filtering all timestamps
+				// Track actual min/max times to handle out-of-order timestamps
 				trueOccurrences := 0
 				var filteredFirstTS, filteredLastTS string
+				var filteredFirstT, filteredLastT time.Time
+
 				for _, ts := range agg.allTimestamps {
 					t, err := time.Parse(time.RFC3339Nano, ts)
 					if err == nil && !t.Before(cutoff) {
-						trueOccurrences++
-						if filteredFirstTS == "" {
+						if trueOccurrences == 0 || t.Before(filteredFirstT) {
+							filteredFirstT = t
 							filteredFirstTS = ts
 						}
-						filteredLastTS = ts
+						if trueOccurrences == 0 || t.After(filteredLastT) {
+							filteredLastT = t
+							filteredLastTS = ts
+						}
+						trueOccurrences++
 					}
 				}
 

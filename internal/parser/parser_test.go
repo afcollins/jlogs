@@ -439,3 +439,34 @@ func TestSinceNoFilter(t *testing.T) {
 		t.Errorf("occurrences = %d, want 2 (no filter)", entry.Occurrences)
 	}
 }
+
+func TestSinceWithOutOfOrderTimestamps(t *testing.T) {
+	// Parser with 2 hour since filter
+	p, _ := New(5, 1, 2*time.Hour)
+
+	// Timestamps are out of order: latest (10:10) appears before 10:05
+	lines := []string{
+		`2024-12-30T09:00:00.000000000Z I1230 09:00:00.000000       1 test.go:1] oldest`,
+		`2024-12-30T10:00:00.000000000Z I1230 10:00:00.000000       1 test.go:1] log 2`,
+		`2024-12-30T10:10:00.000000000Z I1230 10:10:00.000000       1 test.go:1] latest`,
+		`2024-12-30T10:05:00.000000000Z I1230 10:05:00.000000       1 test.go:1] log 4 (out of order)`,
+	}
+
+	for _, line := range lines {
+		p.parseLine(line)
+	}
+
+	summary := p.Summary()
+	entry := summary["info"][0]
+
+	// All 4 logs are within 2 hours of latest (10:10)
+	if entry.Occurrences != 4 {
+		t.Errorf("occurrences = %d, want 4", entry.Occurrences)
+	}
+
+	// Frequency should be based on actual time range: 09:00 to 10:10 = 70 minutes
+	// 4 logs / 70 minutes ≈ 3.4/h (duration is > 1 hour, so uses /h unit)
+	if entry.Frequency != "3.4/h" {
+		t.Errorf("frequency = %q, want \"3.4/h\" (based on chronological min/max, not array order)", entry.Frequency)
+	}
+}
