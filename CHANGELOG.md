@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **2026-05-06**: Frequency calculation now uses correct time unit for exact time boundaries
+  - Logs spanning exactly 1 hour now display as "X/h" instead of incorrect "X/m"
+  - Logs spanning exactly 1 minute now display as "X/m" instead of incorrect "X/s"
+  - Logs spanning exactly 1 day now display as "X/d" instead of incorrect "X/h"
+  - Changed boundary conditions from `<=` to `<` to properly select the appropriate unit
+- **2026-05-06**: Fixed `--since` filtering with out-of-order timestamps
+  - Frequency calculation now correctly uses chronological min/max timestamps instead of array order
+  - Previously, if latest timestamp appeared before earlier ones in the log file, frequency would be calculated incorrectly
+  - Now tracks actual earliest and latest times during filtering with minimal performance overhead
+- **2026-05-06**: Fixed `--since` to show accurate occurrence counts
+  - Previously counted only buffered occurrences (first N + last N), not total occurrences in time window
+  - Now tracks all timestamps to calculate true occurrence count within the filtered time range
+  - Example: 864 logs in last day now correctly shows `"occurrences": 864` instead of showing only buffered count
+- **2026-05-06**: Fixed `first_occurrences` display when using `--since` flag
+  - Previously showed empty array when original first occurrences fell outside the time window
+  - Now properly recalculates and displays the chronologically first N occurrences within the filtered time window
+
 ### Changed
 - **2026-05-06**: Frequency calculation now shows actual occurrences per time unit, not extrapolated rates
   - Unit is chosen based on time span duration, not rate magnitude

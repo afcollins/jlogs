@@ -38,10 +38,36 @@ jlogs -first-n 2 -last-n 10 -pretty=false app.log
 ```
 
 ### Options
-- `-last-n`: Number of recent occurrences to retain per source (1-10, default: 5)
-- `-first-n`: Number of first occurrences to retain per source (1-10, default: 1)
-- `-since`: Filter logs from last N time units (e.g., "1 hour", "2 days", "30 minutes")
-- `-pretty`: Pretty-print JSON output (default: true)
+
+#### `-last-n` (default: 5)
+Number of most recent occurrences to retain per source in the output.
+- Valid range: 1-10
+- Values outside this range fall back to default (5)
+- Example: `-last-n 3` keeps the 3 most recent log entries for each source
+
+#### `-first-n` (default: 1)
+Number of first occurrences to retain per source in the output.
+- Valid range: 1-10
+- Values outside this range fall back to default (1)
+- Useful for capturing initial log entries along with recent ones
+- Example: `-first-n 2` keeps the 2 earliest log entries for each source
+
+#### `-since`
+Filter logs to include only those from the last N time units, relative to the latest timestamp in the log stream.
+- Supported units: `minute(s)`, `hour(s)`, `day(s)`
+- Format: `"N unit"` (quotes recommended)
+- When applied, recalculates occurrence counts and frequencies based on the filtered time window
+- Sources with no occurrences in the time window are omitted from output
+- Examples:
+  - `-since "1 hour"` - logs from the last hour
+  - `-since "30 minutes"` - logs from the last 30 minutes
+  - `-since "2 days"` - logs from the last 2 days
+
+#### `-pretty` (default: true)
+Enable or disable pretty-printed JSON output.
+- `true`: indented, human-readable JSON
+- `false`: compact, single-line JSON
+- Example: `-pretty=false` for compact output
 
 ## Output
 
