@@ -173,8 +173,9 @@ func (p *Parser) Consume(r io.Reader) error {
 }
 
 // calculateFrequency computes the occurrence rate between first and last timestamps.
-// Returns a formatted string like "10/s", "5/m", or "4/h" based on the rate.
+// Returns a formatted string like "10/s", "5/m", "4/h", or "0.5/d" based on the rate.
 // If there's only one occurrence or timestamps can't be parsed, returns empty string.
+// Requires a minimum duration of 1 second to avoid misleading rates from startup bursts.
 func calculateFrequency(occurrences int, firstTS, lastTS string) string {
 	if occurrences <= 1 || firstTS == "" || lastTS == "" {
 		return ""
@@ -190,9 +191,11 @@ func calculateFrequency(occurrences int, firstTS, lastTS string) string {
 	}
 
 	duration := last.Sub(first).Seconds()
-	if duration == 0 {
-		// All occurrences in the same second
-		return fmt.Sprintf("%d/s", occurrences)
+
+	// Require at least 1 second of duration to avoid misleading frequencies
+	// from startup bursts (e.g., 57 logs in 4ms showing as "13154/s")
+	if duration < 1.0 {
+		return ""
 	}
 
 	// Calculate per-second rate
@@ -209,9 +212,15 @@ func calculateFrequency(occurrences int, firstTS, lastTS string) string {
 		return fmt.Sprintf("%.0f/m", math.Round(perMinute))
 	}
 
-	// Use per-hour rate
+	// Calculate per-hour rate
 	perHour := float64(occurrences) / (duration / 3600.0)
-	return fmt.Sprintf("%.0f/h", math.Round(perHour))
+	if perHour >= 1.0 {
+		return fmt.Sprintf("%.0f/h", math.Round(perHour))
+	}
+
+	// Use per-day rate (can be fractional, e.g., "0.5/d" for 1 log every 2 days)
+	perDay := float64(occurrences) / (duration / 86400.0)
+	return fmt.Sprintf("%.1f/d", perDay)
 }
 
 // addEntry records one parsed log event under the appropriate severity bucket.

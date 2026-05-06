@@ -231,6 +231,27 @@ func TestFrequencyCalculation(t *testing.T) {
 			want:        "2/h",
 		},
 		{
+			name:        "per day - 2 logs in 15 hours (0.13/h becomes 3.2/d)",
+			occurrences: 2,
+			firstTS:     "2026-04-29T16:51:29.280896980Z",
+			lastTS:      "2026-04-30T07:53:21.563792653Z",
+			want:        "3.2/d",
+		},
+		{
+			name:        "per day - 2 logs in 4 days (0.5/d)",
+			occurrences: 2,
+			firstTS:     "2024-12-26T10:00:00.000000000Z",
+			lastTS:      "2024-12-30T10:00:00.000000000Z",
+			want:        "0.5/d",
+		},
+		{
+			name:        "per day - 5 logs in 10 days",
+			occurrences: 5,
+			firstTS:     "2024-12-20T10:00:00.000000000Z",
+			lastTS:      "2024-12-30T10:00:00.000000000Z",
+			want:        "0.5/d",
+		},
+		{
 			name:        "single occurrence",
 			occurrences: 1,
 			firstTS:     "2024-12-30T10:00:00.000000000Z",
@@ -238,11 +259,18 @@ func TestFrequencyCalculation(t *testing.T) {
 			want:        "",
 		},
 		{
-			name:        "same timestamp - all in same second",
+			name:        "same timestamp - duration too short",
 			occurrences: 5,
 			firstTS:     "2024-12-30T10:00:00.000000000Z",
 			lastTS:      "2024-12-30T10:00:00.000000000Z",
-			want:        "5/s",
+			want:        "",
+		},
+		{
+			name:        "burst in milliseconds - duration too short",
+			occurrences: 57,
+			firstTS:     "2026-04-29T16:51:23.030739787Z",
+			lastTS:      "2026-04-29T16:51:23.035073027Z",
+			want:        "",
 		},
 		{
 			name:        "invalid first timestamp",

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **2026-05-06**: Frequency calculation now requires minimum 1-second duration to avoid misleading rates from startup bursts
+  - Previously, logs occurring in milliseconds (e.g., 57 logs in 4ms) would show unrealistic frequencies like "13154/s"
+  - Now omits frequency for bursts shorter than 1 second, as these don't represent sustained logging patterns
+- **2026-05-06**: Added per-day frequency unit to handle low-frequency logs
+  - Prevents showing "0/h" for logs that occur less than once per hour
+  - Shows fractional rates like "3.2/d" for logs occurring multiple times per day
+  - Example: 2 logs in 15 hours displays as "3.2/d" instead of "0/h"
+
 ### Changed
 - **2026-05-06**: Simplified output key from dynamic `last_N_occurrences` (e.g., `last_five_occurrences`, `last_three_occurrences`) to static `last_occurrences` regardless of the `-last-n` value
   - The `-last-n` flag still controls how many recent occurrences are retained (1-10, default: 5)
@@ -18,9 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Intelligently formats frequency as:
     - `X/s` (per second) when rate ≥ 1/s
     - `X/m` (per minute) when rate ≥ 1/m but < 1/s
-    - `X/h` (per hour) when rate < 1/m
+    - `X/h` (per hour) when rate ≥ 1/h but < 1/m
+    - `X.X/d` (per day, with decimal) when rate < 1/h
   - Appears in JSON output under the `frequency` field
-  - Example: "10/s", "5/m", "4/h"
+  - Example: "10/s", "5/m", "4/h", "3.2/d"
 - **2026-05-06**: New `-first-n` flag to track the first N occurrences per source
   - Default value: 1
   - Valid range: 1-10
