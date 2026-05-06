@@ -124,8 +124,9 @@ type sourceAggregator struct {
 	recent         *ring
 	first          []Occurrence
 	firstCap       int
-	firstTimestamp string // timestamp of the first occurrence
-	lastTimestamp  string // timestamp of the most recent occurrence
+	firstTimestamp string   // timestamp of the first occurrence
+	lastTimestamp  string   // timestamp of the most recent occurrence
+	allTimestamps  []string // all timestamps for accurate --since filtering
 }
 
 // New constructs a Parser. lastN and firstN must be in the range [1, 10];
@@ -206,8 +207,8 @@ func calculateFrequency(occurrences int, firstTS, lastTS string) string {
 	// Choose unit based on duration (not rate) and show actual occurrences per that unit
 	// This avoids extrapolation: 5 logs in 7 minutes shows as "0.7/m", not "43/h"
 
-	if duration <= 60 {
-		// Up to 1 minute: use seconds
+	if duration < 60 {
+		// Less than 1 minute: use seconds
 		rate := float64(occurrences) / duration
 		if rate >= 10 {
 			return fmt.Sprintf("%.0f/s", rate)
@@ -215,8 +216,8 @@ func calculateFrequency(occurrences int, firstTS, lastTS string) string {
 		return fmt.Sprintf("%.1f/s", rate)
 	}
 
-	if duration <= 3600 {
-		// Up to 1 hour: use minutes
+	if duration < 3600 {
+		// Less than 1 hour: use minutes
 		rate := float64(occurrences) / (duration / 60.0)
 		if rate >= 10 {
 			return fmt.Sprintf("%.0f/m", rate)
@@ -224,8 +225,8 @@ func calculateFrequency(occurrences int, firstTS, lastTS string) string {
 		return fmt.Sprintf("%.1f/m", rate)
 	}
 
-	if duration <= 86400 {
-		// Up to 1 day: use hours
+	if duration < 86400 {
+		// Less than 1 day: use hours
 		rate := float64(occurrences) / (duration / 3600.0)
 		if rate >= 10 {
 			return fmt.Sprintf("%.0f/h", rate)
@@ -233,7 +234,7 @@ func calculateFrequency(occurrences int, firstTS, lastTS string) string {
 		return fmt.Sprintf("%.1f/h", rate)
 	}
 
-	// More than 1 day: use days
+	// 1 day or more: use days
 	rate := float64(occurrences) / (duration / 86400.0)
 	if rate >= 10 {
 		return fmt.Sprintf("%.0f/d", rate)
@@ -264,11 +265,13 @@ func (p *Parser) addEntry(sev Severity, source, timestamp string, message any) {
 			first:          make([]Occurrence, 0, p.firstN),
 			firstCap:       p.firstN,
 			firstTimestamp: timestamp,
+			allTimestamps:  make([]string, 0),
 		}
 		bucket[source] = agg
 	}
 	agg.occurrences++
 	agg.lastTimestamp = timestamp
+	agg.allTimestamps = append(agg.allTimestamps, timestamp)
 	agg.recent.push(Occurrence{Time: timestamp, Log: message})
 	// Only collect first N occurrences
 	if len(agg.first) < agg.firstCap {

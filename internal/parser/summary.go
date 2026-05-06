@@ -40,31 +40,46 @@ func (p *Parser) Summary() Summary {
 
 			// Apply time filter if --since is specified
 			if applySinceFilter {
-				recent = filterOccurrences(recent, cutoff)
-				first = filterOccurrences(first, cutoff)
-				occurrences = len(recent) + len(first)
-
-				// Recalculate unique count (recent + first might overlap)
-				allFiltered := append([]Occurrence{}, first...)
-				allFiltered = append(allFiltered, recent...)
-				occurrences = len(deduplicateOccurrences(allFiltered))
+				// Calculate the true occurrence count by filtering all timestamps
+				trueOccurrences := 0
+				var filteredFirstTS, filteredLastTS string
+				for _, ts := range agg.allTimestamps {
+					t, err := time.Parse(time.RFC3339Nano, ts)
+					if err == nil && !t.Before(cutoff) {
+						trueOccurrences++
+						if filteredFirstTS == "" {
+							filteredFirstTS = ts
+						}
+						filteredLastTS = ts
+					}
+				}
 
 				// Skip sources with no occurrences after filtering
-				if occurrences == 0 {
+				if trueOccurrences == 0 {
 					continue
 				}
 
-				// Update first/last timestamps for frequency calculation
-				if len(first) > 0 {
-					firstTS = first[0].Time
-				} else if len(recent) > 0 {
-					firstTS = recent[0].Time
-				}
-				if len(recent) > 0 {
-					lastTS = recent[len(recent)-1].Time
-				} else if len(first) > 0 {
-					lastTS = first[len(first)-1].Time
-				}
+				// Combine and filter the actual occurrence data (for display)
+				allOccurrences := append([]Occurrence{}, first...)
+				allOccurrences = append(allOccurrences, recent...)
+				allOccurrences = deduplicateOccurrences(allOccurrences)
+				filtered := filterOccurrences(allOccurrences, cutoff)
+
+				// Sort by timestamp to extract first N and last N
+				sortOccurrencesByTime(filtered)
+
+				// Extract first N occurrences from filtered set
+				firstN := min(len(filtered), p.firstN)
+				first = filtered[:firstN]
+
+				// Extract last N occurrences from filtered set
+				lastN := min(len(filtered), p.lastN)
+				recent = filtered[len(filtered)-lastN:]
+
+				// Use the true count from all timestamps
+				occurrences = trueOccurrences
+				firstTS = filteredFirstTS
+				lastTS = filteredLastTS
 			}
 
 			entries = append(entries, SourceSummary{
@@ -109,6 +124,20 @@ func deduplicateOccurrences(occurrences []Occurrence) []Occurrence {
 		}
 	}
 	return result
+}
+
+// sortOccurrencesByTime sorts occurrences by timestamp in ascending order (oldest first).
+func sortOccurrencesByTime(occurrences []Occurrence) {
+	sort.Slice(occurrences, func(i, j int) bool {
+		// Parse timestamps for comparison
+		ti, erri := time.Parse(time.RFC3339Nano, occurrences[i].Time)
+		tj, errj := time.Parse(time.RFC3339Nano, occurrences[j].Time)
+		// If parsing fails, maintain original order
+		if erri != nil || errj != nil {
+			return i < j
+		}
+		return ti.Before(tj)
+	})
 }
 
 // jsonMarshal is a thin wrapper that disables HTML escaping so log messages

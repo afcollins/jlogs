@@ -190,11 +190,11 @@ func TestFrequencyCalculation(t *testing.T) {
 			want:        "10/s",
 		},
 		{
-			name:        "per second - 120 logs in 60 seconds",
+			name:        "per minute - 120 logs in 60 seconds (exactly 1 minute)",
 			occurrences: 120,
 			firstTS:     "2024-12-30T10:46:00.000000000Z",
 			lastTS:      "2024-12-30T10:47:00.000000000Z",
-			want:        "2.0/s",
+			want:        "120/m",
 		},
 		{
 			name:        "per minute - 5 logs in 10 minutes",
