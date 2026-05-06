@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **2026-05-06**: Frequency calculation now shows actual occurrences per time unit, not extrapolated rates
+  - Unit is chosen based on time span duration, not rate magnitude
+  - All units (s/m/h/d) can now show fractional values for rates < 10
+  - Example: 5 logs in 7 minutes now shows "0.7/m" instead of "43/h"
+  - Prevents misleading extrapolations where small sample sizes appear as high rates
+
 ### Added
 - **2026-05-06**: New `--since` flag to filter logs by time window
   - Filters logs from the last N time units relative to the latest log timestamp

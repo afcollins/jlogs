@@ -194,52 +194,59 @@ func TestFrequencyCalculation(t *testing.T) {
 			occurrences: 120,
 			firstTS:     "2024-12-30T10:46:00.000000000Z",
 			lastTS:      "2024-12-30T10:47:00.000000000Z",
-			want:        "2/s",
+			want:        "2.0/s",
 		},
 		{
-			name:        "per hour - 5 logs in 10 minutes (0.5/m rounds to 30/h)",
+			name:        "per minute - 5 logs in 10 minutes",
 			occurrences: 5,
 			firstTS:     "2024-12-30T10:00:00.000000000Z",
 			lastTS:      "2024-12-30T10:10:00.000000000Z",
-			want:        "30/h",
+			want:        "0.5/m",
 		},
 		{
 			name:        "per minute - 10 logs in 5 minutes",
 			occurrences: 10,
 			firstTS:     "2024-12-30T10:00:00.000000000Z",
 			lastTS:      "2024-12-30T10:05:00.000000000Z",
-			want:        "2/m",
+			want:        "2.0/m",
 		},
 		{
 			name:        "per minute - 30 logs in 15 minutes",
 			occurrences: 30,
 			firstTS:     "2024-12-30T10:00:00.000000000Z",
 			lastTS:      "2024-12-30T10:15:00.000000000Z",
-			want:        "2/m",
+			want:        "2.0/m",
+		},
+		{
+			name:        "per minute - 5 logs in 7 minutes (actual case from user)",
+			occurrences: 5,
+			firstTS:     "2026-05-04T07:50:45.581233383Z",
+			lastTS:      "2026-05-04T07:57:45.637694164Z",
+			want:        "0.7/m",
 		},
 		{
 			name:        "per hour - 4 logs in 2 hours",
 			occurrences: 4,
 			firstTS:     "2024-12-30T10:00:00.000000000Z",
 			lastTS:      "2024-12-30T12:00:00.000000000Z",
-			want:        "2/h",
+			want:        "2.0/h",
 		},
 		{
 			name:        "per hour - 10 logs in 5 hours",
 			occurrences: 10,
 			firstTS:     "2024-12-30T10:00:00.000000000Z",
 			lastTS:      "2024-12-30T15:00:00.000000000Z",
-			want:        "2/h",
+			want:        "2.0/h",
 		},
 		{
-			name:        "per day - 2 logs in 15 hours (0.13/h becomes 3.2/d)",
+			name:        "per hour - 2 logs in 15 hours",
 			occurrences: 2,
 			firstTS:     "2026-04-29T16:51:29.280896980Z",
 			lastTS:      "2026-04-30T07:53:21.563792653Z",
-			want:        "3.2/d",
+			want:        "0.1/h",
 		},
 		{
-			name:        "per day - 2 logs in 4 days (0.5/d)",
+			name:        "per day - 2 logs in 4 days",
 			occurrences: 2,
 			firstTS:     "2024-12-26T10:00:00.000000000Z",
 			lastTS:      "2024-12-30T10:00:00.000000000Z",
@@ -323,9 +330,9 @@ func TestFrequencyInSummary(t *testing.T) {
 		t.Errorf("occurrences = %d, want 5", entry.Occurrences)
 	}
 
-	// 5 occurrences over 4 seconds = 1.25/s, which rounds to 1/s
-	if entry.Frequency != "1/s" {
-		t.Errorf("frequency = %q, want %q", entry.Frequency, "1/s")
+	// 5 occurrences over 4 seconds = 1.25/s, shown as 1.2/s (one decimal)
+	if entry.Frequency != "1.2/s" {
+		t.Errorf("frequency = %q, want %q", entry.Frequency, "1.2/s")
 	}
 }
 

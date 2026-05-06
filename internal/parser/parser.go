@@ -18,7 +18,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -178,7 +177,8 @@ func (p *Parser) Consume(r io.Reader) error {
 }
 
 // calculateFrequency computes the occurrence rate between first and last timestamps.
-// Returns a formatted string like "10/s", "5/m", "4/h", or "0.5/d" based on the rate.
+// Returns actual occurrences per time unit (not extrapolated), e.g., "5.0/m", "0.7/h", "2.5/d".
+// Unit is chosen based on time span duration, and rates can be fractional for all units.
 // If there's only one occurrence or timestamps can't be parsed, returns empty string.
 // Requires a minimum duration of 1 second to avoid misleading rates from startup bursts.
 func calculateFrequency(occurrences int, firstTS, lastTS string) string {
@@ -198,34 +198,47 @@ func calculateFrequency(occurrences int, firstTS, lastTS string) string {
 	duration := last.Sub(first).Seconds()
 
 	// Require at least 1 second of duration to avoid misleading frequencies
-	// from startup bursts (e.g., 57 logs in 4ms showing as "13154/s")
+	// from startup bursts (e.g., 57 logs in 4ms)
 	if duration < 1.0 {
 		return ""
 	}
 
-	// Calculate per-second rate
-	perSecond := float64(occurrences) / duration
+	// Choose unit based on duration (not rate) and show actual occurrences per that unit
+	// This avoids extrapolation: 5 logs in 7 minutes shows as "0.7/m", not "43/h"
 
-	// Use seconds if >= 1/s
-	if perSecond >= 1.0 {
-		return fmt.Sprintf("%.0f/s", math.Round(perSecond))
+	if duration <= 60 {
+		// Up to 1 minute: use seconds
+		rate := float64(occurrences) / duration
+		if rate >= 10 {
+			return fmt.Sprintf("%.0f/s", rate)
+		}
+		return fmt.Sprintf("%.1f/s", rate)
 	}
 
-	// Calculate per-minute rate
-	perMinute := float64(occurrences) / (duration / 60.0)
-	if perMinute >= 1.0 {
-		return fmt.Sprintf("%.0f/m", math.Round(perMinute))
+	if duration <= 3600 {
+		// Up to 1 hour: use minutes
+		rate := float64(occurrences) / (duration / 60.0)
+		if rate >= 10 {
+			return fmt.Sprintf("%.0f/m", rate)
+		}
+		return fmt.Sprintf("%.1f/m", rate)
 	}
 
-	// Calculate per-hour rate
-	perHour := float64(occurrences) / (duration / 3600.0)
-	if perHour >= 1.0 {
-		return fmt.Sprintf("%.0f/h", math.Round(perHour))
+	if duration <= 86400 {
+		// Up to 1 day: use hours
+		rate := float64(occurrences) / (duration / 3600.0)
+		if rate >= 10 {
+			return fmt.Sprintf("%.0f/h", rate)
+		}
+		return fmt.Sprintf("%.1f/h", rate)
 	}
 
-	// Use per-day rate (can be fractional, e.g., "0.5/d" for 1 log every 2 days)
-	perDay := float64(occurrences) / (duration / 86400.0)
-	return fmt.Sprintf("%.1f/d", perDay)
+	// More than 1 day: use days
+	rate := float64(occurrences) / (duration / 86400.0)
+	if rate >= 10 {
+		return fmt.Sprintf("%.0f/d", rate)
+	}
+	return fmt.Sprintf("%.1f/d", rate)
 }
 
 // addEntry records one parsed log event under the appropriate severity bucket.
