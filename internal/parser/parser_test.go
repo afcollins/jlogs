@@ -113,10 +113,11 @@ func TestMalformedJSONCapturedAsUnstructured(t *testing.T) {
 		t.Errorf("unstructured entries = %d, want 1 (bad JSON)", got)
 	}
 
-	// Verify the malformed JSON is preserved as-is
+	// Verify the malformed JSON is preserved without timestamp prefix
 	msg, ok := summary["unstructured"][0].Recent[0].Log.(string)
-	if !ok || msg != bad {
-		t.Errorf("unstructured log = %q, want %q", msg, bad)
+	want := "{not valid json}"
+	if !ok || msg != want {
+		t.Errorf("unstructured log = %q, want %q", msg, want)
 	}
 }
 
@@ -577,10 +578,11 @@ func TestUnstructuredJSONWithUnknownSeverity(t *testing.T) {
 		t.Fatalf("expected 1 unstructured entry, got %d", len(summary["unstructured"]))
 	}
 
-	// Full line should be preserved
+	// Content without timestamp should be preserved
 	msg, ok := summary["unstructured"][0].Recent[0].Log.(string)
-	if !ok || msg != line {
-		t.Errorf("log = %q, want full line", msg)
+	want := `{"level":"debug","caller":"test.go:1","msg":"debug msg"}`
+	if !ok || msg != want {
+		t.Errorf("log = %q, want %q", msg, want)
 	}
 }
 
@@ -623,10 +625,11 @@ func TestUnstructuredKlogUnknownSeverity(t *testing.T) {
 		t.Fatalf("expected 1 unstructured entry, got %d", len(summary["unstructured"]))
 	}
 
-	// Full line should be preserved
+	// Content without timestamp should be preserved
 	msg, ok := summary["unstructured"][0].Recent[0].Log.(string)
-	if !ok || msg != line {
-		t.Errorf("log = %q, want full line", msg)
+	want := `X1230 10:46:29.390512  1 test.go:1] Unknown severity`
+	if !ok || msg != want {
+		t.Errorf("log = %q, want %q", msg, want)
 	}
 }
 

@@ -45,7 +45,7 @@ func (p *Parser) parseLine(line string) error {
 		sev, ok := klogLevelToSeverity[level]
 		if !ok {
 			// klog pattern matched but unknown severity -> unstructured
-			p.addEntry(SevUnstructured, "unstructured", timestamp, line)
+			p.addEntry(SevUnstructured, "unstructured", timestamp, line[jsonOffset:])
 			return nil
 		}
 		source := m[3]
@@ -65,7 +65,7 @@ func (p *Parser) parseLine(line string) error {
 	}
 
 	// Catch-all: didn't match any known format, capture as unstructured
-	p.addEntry(SevUnstructured, "unstructured", timestamp, line)
+	p.addEntry(SevUnstructured, "unstructured", timestamp, rest)
 	return nil
 }
 
