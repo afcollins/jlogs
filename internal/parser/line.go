@@ -2,7 +2,9 @@ package parser
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
+	"time"
 )
 
 // Format constants for the position of the structured-log JSON within a line.
@@ -20,13 +22,20 @@ const (
 
 // parseLine attempts both formats in turn. The work is intentionally kept
 // out of the hot Consume loop so it can be unit-tested in isolation.
-func (p *Parser) parseLine(line string) {
-	// Every line we expect carries the timestamp prefix; if it's shorter,
-	// it can't be either format we recognize, so skip cheaply.
+// Lines that don't match any known format are captured as unstructured.
+// Returns an error if the line doesn't have a valid RFC3339Nano timestamp prefix.
+func (p *Parser) parseLine(line string) error {
+	// Every line must have the 30-char RFC3339Nano timestamp prefix + space (31 chars total)
 	if len(line) < jsonOffset {
-		return
+		return fmt.Errorf("line too short (< 31 chars), expected timestamp prefix from 'oc/kubectl logs --timestamps=true': %q", line)
 	}
+
 	timestamp := line[:timestampLen]
+
+	// Validate that the timestamp prefix is a valid RFC3339Nano timestamp
+	if _, err := time.Parse(time.RFC3339Nano, timestamp); err != nil {
+		return fmt.Errorf("invalid timestamp prefix (expected RFC3339Nano format): %q - did you forget --timestamps=true?", timestamp)
+	}
 
 	// Try klog format first — it's the more common shape and the regex is
 	// fast on lines that don't match (the leading anchor fails quickly).
@@ -35,21 +44,29 @@ func (p *Parser) parseLine(line string) {
 		level := m[2][0]
 		sev, ok := klogLevelToSeverity[level]
 		if !ok {
-			return
+			// klog pattern matched but unknown severity -> unstructured
+			p.addEntry(SevUnstructured, "unstructured", timestamp, line)
+			return nil
 		}
 		source := m[3]
 		message := m[4]
 		p.addEntry(sev, source, timestamp, message)
-		return
+		return nil
 	}
 
 	// Try JSON-structured format. Cheap shape check before invoking the
 	// JSON decoder, which is comparatively expensive.
 	rest := line[jsonOffset:]
-	if !strings.HasPrefix(rest, "{") || !strings.HasSuffix(rest, "}") {
-		return
+	if strings.HasPrefix(rest, "{") && strings.HasSuffix(rest, "}") {
+		if p.tryParseJSONLine(timestamp, rest) {
+			return nil // Successfully parsed and added
+		}
+		// JSON shape but parsing failed -> fall through to unstructured
 	}
-	p.parseJSONLine(timestamp, rest)
+
+	// Catch-all: didn't match any known format, capture as unstructured
+	p.addEntry(SevUnstructured, "unstructured", timestamp, line)
+	return nil
 }
 
 // jsonLog is a permissive view over the structured-log object. We only pull
@@ -64,13 +81,14 @@ type jsonLog struct {
 	Error    string `json:"error"`
 }
 
-func (p *Parser) parseJSONLine(timestamp, payload string) {
+// tryParseJSONLine attempts to parse a JSON-structured log line.
+// Returns true if parsing succeeded and entry was added, false otherwise.
+func (p *Parser) tryParseJSONLine(timestamp, payload string) bool {
 	var meta jsonLog
 	if err := json.Unmarshal([]byte(payload), &meta); err != nil {
-		// Malformed JSON on a single line is not fatal — skip it.
-		// This is a deliberate departure from the Python original, which
-		// raised SystemError and aborted the whole run.
-		return
+		// Malformed JSON on a single line is not fatal — return false
+		// so caller can capture as unstructured.
+		return false
 	}
 
 	// Resolve severity: prefer "level", fall back to "severity".
@@ -80,7 +98,8 @@ func (p *Parser) parseJSONLine(timestamp, payload string) {
 	}
 	sev, ok := jsonLevelToSeverity[strings.ToLower(rawLevel)]
 	if !ok {
-		return
+		// Unrecognized severity -> return false for unstructured capture
+		return false
 	}
 
 	source := meta.Caller
@@ -93,7 +112,7 @@ func (p *Parser) parseJSONLine(timestamp, payload string) {
 	// re-encoding round-trips cleanly without losing fields we didn't model.
 	var full map[string]any
 	if err := json.Unmarshal([]byte(payload), &full); err != nil {
-		return
+		return false
 	}
 
 	// Append the error field into the message for visibility, mirroring the
@@ -110,4 +129,5 @@ func (p *Parser) parseJSONLine(timestamp, payload string) {
 	}
 
 	p.addEntry(sev, source, timestamp, full)
+	return true
 }

@@ -29,15 +29,16 @@ import (
 type Severity string
 
 const (
-	SevInfo    Severity = "info"
-	SevWarning Severity = "warning"
-	SevError   Severity = "error"
-	SevFatal   Severity = "fatal"
+	SevInfo         Severity = "info"
+	SevWarning      Severity = "warning"
+	SevError        Severity = "error"
+	SevFatal        Severity = "fatal"
+	SevUnstructured Severity = "unstructured"
 )
 
 // trackedSeverities is the ordered set of severities we aggregate. Order is
 // preserved in the output for stable, human-friendly diffs.
-var trackedSeverities = []Severity{SevInfo, SevWarning, SevError, SevFatal}
+var trackedSeverities = []Severity{SevInfo, SevWarning, SevError, SevFatal, SevUnstructured}
 
 // Occurrence is a single retained log event for a given source.
 type Occurrence struct {
@@ -154,9 +155,9 @@ func New(lastN, firstN int, since time.Duration) (*Parser, error) {
 }
 
 // Consume reads r line-by-line until EOF, parsing and aggregating each line.
-// Malformed individual lines are skipped silently; only I/O errors are
-// returned. We use a Scanner with a generous buffer because real-world logs
-// occasionally contain very long lines (stack traces, JSON blobs).
+// Returns an error if any line has an invalid timestamp prefix or if I/O fails.
+// We use a Scanner with a generous buffer because real-world logs occasionally
+// contain very long lines (stack traces, JSON blobs).
 func (p *Parser) Consume(r io.Reader) error {
 	scanner := bufio.NewScanner(r)
 	// Default Scanner buffer is 64KB which is too small for long stack traces.
@@ -169,7 +170,9 @@ func (p *Parser) Consume(r io.Reader) error {
 		if line == "" {
 			continue
 		}
-		p.parseLine(line)
+		if err := p.parseLine(line); err != nil {
+			return err
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("reading input: %w", err)

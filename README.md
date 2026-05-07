@@ -6,9 +6,12 @@ A fast Go CLI tool that parses and aggregates log lines into a structured JSON s
 
 `jlogs` reads log files (or stdin), recognizes klog-style and JSON-structured log formats, groups entries by severity and source location, and outputs a JSON summary with occurrence counts and recent examples.
 
+**IMPORTANT**: `jlogs` requires that **every log line** starts with an RFC3339Nano timestamp (30 characters). This is the format produced by `oc logs --timestamps=true` or `kubectl logs --timestamps=true`. Without the `--timestamps=true` flag, `jlogs` will exit with an error.
+
 Supported log formats:
 - **klog-style**: `2024-12-30T10:46:29.390512670Z I1230 10:46:29.390512  1 node_controller.go:1056] No nodes available`
 - **JSON-structured**: `2024-12-30T10:46:29.390512670Z {"level":"info","caller":"foo.go:42","msg":"..."}`
+- **unstructured**: Any line with a valid timestamp that doesn't match klog or JSON formats
 
 ## Installation
 
@@ -26,11 +29,21 @@ go build -o jlogs ./cmd/jlogs
 
 ## Usage
 
+**Kubernetes/OpenShift logs (recommended):**
 ```bash
-# Read from stdin
-cat app.log | jlogs
+# CORRECT: With --timestamps=true
+oc logs -n openshift-etcd pod-name --timestamps=true | jlogs
+kubectl logs pod-name --timestamps=true | jlogs
 
-# Read from files
+# WRONG: Without timestamps will fail
+oc logs pod-name | jlogs
+# Error: invalid timestamp prefix - did you forget --timestamps=true?
+```
+
+**Local files:**
+```bash
+# Files must have RFC3339Nano timestamp prefix on each line
+cat app.log | jlogs
 jlogs app.log error.log
 
 # Customize output
@@ -71,12 +84,16 @@ Enable or disable pretty-printed JSON output.
 
 ## Output
 
-Produces a JSON summary grouped by severity (info, warning, error, fatal) with:
+Produces a JSON summary grouped by severity (info, warning, error, fatal, unstructured) with:
 - Source file and line number
 - Total occurrence count
 - Frequency (occurrences per time period: X/s, X/m, X/h, or X.X/d)
 - First N log entries
 - Most recent N log entries
+
+**Severity categories:**
+- **info, warning, error, fatal**: Recognized klog and JSON log levels
+- **unstructured**: Lines with valid timestamp that don't match klog or JSON formats, or have unrecognized severity levels
 
 ---
 
