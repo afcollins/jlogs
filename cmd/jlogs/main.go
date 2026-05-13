@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/gmeghnag/jlogs/internal/parser"
+	"github.com/gmeghnag/jlogs/cmd/jlogs/version"
 )
 
 func main() {
@@ -28,7 +29,13 @@ func main() {
 	firstN := flag.Int("first-n", 1, "number of first occurrences to retain per source (1-10)")
 	pretty := flag.Bool("pretty", true, "pretty-print the JSON output")
 	since := flag.String("since", "", "filter logs from last N time units (e.g., \"1 hour\", \"2 days\", \"30 minutes\")")
+	v := flag.Bool("v", false, "print version information")
 	flag.Parse()
+
+	if *v {
+		fmt.Printf("jlogs version %s (commit %s)\n", version.Tag, version.Hash)
+		os.Exit(0)
+	}
 
 	var sinceDuration time.Duration
 	if *since != "" {

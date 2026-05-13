@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **2026-05-13**: New `-v` flag to print version information
+  - Displays git tag and commit hash set at build time via ldflags
+  - Example: `jlogs -v` outputs `jlogs version v1.0.0 (commit a1b2c3d)`
+  - Default values when not built with ldflags: `dev` (tag) and `unknown` (hash)
+
 ### Fixed
 - **2026-05-06**: Frequency calculation now uses correct time unit for exact time boundaries
   - Logs spanning exactly 1 hour now display as "X/h" instead of incorrect "X/m"

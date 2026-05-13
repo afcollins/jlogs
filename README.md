@@ -52,6 +52,11 @@ jlogs -first-n 2 -last-n 10 -pretty=false app.log
 
 ### Options
 
+#### `-v`
+Print version information and exit.
+- Displays the git tag and commit hash set at build time
+- Example: `jlogs -v` outputs `jlogs version v1.0.0 (commit a1b2c3d)`
+
 #### `-last-n` (default: 5)
 Number of most recent occurrences to retain per source in the output.
 - Valid range: 1-10
