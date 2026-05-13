@@ -15,6 +15,14 @@ Supported log formats:
 
 ## Installation
 
+### Download the latest binary
+```
+# cd to a directory that is in your $PATH
+curl -sL "https://github.com/gmeghnag/jlogs/releases/latest/download/jlogs_$(uname)_$(uname -m).tar.gz" | tar xzf - jlogs && chmod +x ./jlogs
+
+jlogs -h
+```
+
 ### Using go install
 ```bash
 go install github.com/gmeghnag/jlogs/cmd/jlogs@latest
