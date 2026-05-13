@@ -3,6 +3,7 @@
 A fast Go CLI tool that parses and aggregates log lines into a structured JSON summary.
 
 <img src="./jlogs.png" width="100%">
+
 ## Purpose
 
 `jlogs` reads log files (or stdin), recognizes klog-style and JSON-structured log formats, groups entries by severity and source location, and outputs a JSON summary with occurrence counts and recent examples.
