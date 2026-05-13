@@ -18,20 +18,20 @@ jobs:
 
       - name: Build
         run: |
-          echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV 
+          echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
           TAG="${GITHUB_REF#refs/tags/}"
           HASH=$(git log -n1 --pretty=format:%h)
           echo ${TAG} ${HASH}
           export PATH=$PATH:/usr/local/go/bin \
-          && env GOOS=linux CGO_ENABLED=0 GOARCH=amd64 go build -ldflags "-X 'github.com/gmeghnag/jlogs/cmd/jlogs/version.Tag=${TAG}' -X github.com/gmeghnag/jlogs/cmd/jlogs/version.Hash=${HASH}" -o jlogs \
+          && env GOOS=linux CGO_ENABLED=0 GOARCH=amd64 go build -ldflags "-X 'github.com/gmeghnag/jlogs/cmd/jlogs/version.Tag=${TAG}' -X github.com/gmeghnag/jlogs/cmd/jlogs/version.Hash=${HASH}" -o jlogs ./cmd/jlogs \
           && cp jlogs jlogs_Linux_x86_64 && tar -cvzf jlogs_Linux_x86_64.tar.gz jlogs && rm -rf jlogs \
-          && env GOOS=linux CGO_ENABLED=0 GOARCH=arm64 go build -ldflags "-X 'github.com/gmeghnag/jlogs/cmd/jlogs/version.Tag=${TAG}' -X github.com/gmeghnag/jlogs/cmd/jlogs/version.Hash=${HASH}" -o jlogs \
+          && env GOOS=linux CGO_ENABLED=0 GOARCH=arm64 go build -ldflags "-X 'github.com/gmeghnag/jlogs/cmd/jlogs/version.Tag=${TAG}' -X github.com/gmeghnag/jlogs/cmd/jlogs/version.Hash=${HASH}" -o jlogs ./cmd/jlogs \
           && tar -cvzf jlogs_Linux_arm64.tar.gz jlogs && cp jlogs_Linux_arm64.tar.gz jlogs_Linux_aarch64.tar.gz && rm -rf jlogs \
-          && env GOOS=darwin CGO_ENABLED=0 GOARCH=amd64 go build -ldflags "-X 'github.com/gmeghnag/jlogs/cmd/jlogs/version.Tag=${TAG}' -X github.com/gmeghnag/jlogs/cmd/jlogs/version.Hash=${HASH}" -o jlogs \
+          && env GOOS=darwin CGO_ENABLED=0 GOARCH=amd64 go build -ldflags "-X 'github.com/gmeghnag/jlogs/cmd/jlogs/version.Tag=${TAG}' -X github.com/gmeghnag/jlogs/cmd/jlogs/version.Hash=${HASH}" -o jlogs ./cmd/jlogs \
           && cp jlogs jlogs_Darwin_x86_64 && tar -cvzf jlogs_Darwin_x86_64.tar.gz jlogs && rm -rf jlogs \
-          && env GOOS=darwin CGO_ENABLED=0 GOARCH=arm64 go build -ldflags "-X 'github.com/gmeghnag/jlogs/cmd/jlogs/version.Tag=${TAG}' -X github.com/gmeghnag/jlogs/cmd/jlogs/version.Hash=${HASH}" -o jlogs \
+          && env GOOS=darwin CGO_ENABLED=0 GOARCH=arm64 go build -ldflags "-X 'github.com/gmeghnag/jlogs/cmd/jlogs/version.Tag=${TAG}' -X github.com/gmeghnag/jlogs/cmd/jlogs/version.Hash=${HASH}" -o jlogs ./cmd/jlogs \
           && tar -cvzf jlogs_Darwin_arm64.tar.gz jlogs && cp jlogs_Darwin_arm64.tar.gz jlogs_Darwin_aarch64.tar.gz && rm -rf jlogs \
-          && env GOOS=windows CGO_ENABLED=0 GOARCH=amd64 go build -ldflags "-X 'github.com/gmeghnag/jlogs/cmd/jlogs/version.Tag=${TAG}' -X github.com/gmeghnag/jlogs/cmd/jlogs/version.Hash=${HASH}" -o jlogs.exe \
+          && env GOOS=windows CGO_ENABLED=0 GOARCH=amd64 go build -ldflags "-X 'github.com/gmeghnag/jlogs/cmd/jlogs/version.Tag=${TAG}' -X github.com/gmeghnag/jlogs/cmd/jlogs/version.Hash=${HASH}" -o jlogs.exe ./cmd/jlogs \
           && zip jlogs_Windows_x86_64.zip jlogs.exe \
           && md5sum jlogs_Linux_x86_64.tar.gz | tee -a checksums.txt \
           && md5sum jlogs_Linux_arm64.tar.gz | tee -a checksums.txt \
