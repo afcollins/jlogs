@@ -60,6 +60,16 @@ jlogs app.log error.log
 jlogs -first-n 2 -last-n 10 -pretty=false app.log
 ```
 
+**Timeline view:**
+```bash
+# Group log activity by minute (default)
+oc logs pod-name --timestamps=true | jlogs -timeline
+
+# Group by hour or second
+jlogs -timeline -interval hour app.log
+jlogs -timeline -interval second app.log
+```
+
 ### Options
 
 #### `-v`
@@ -90,6 +100,33 @@ Filter logs to include only those from the last N time units, relative to the la
   - `-since "1 hour"` - logs from the last hour
   - `-since "30 minutes"` - logs from the last 30 minutes
   - `-since "2 days"` - logs from the last 2 days
+
+#### `-timeline`
+Emit a timeline view instead of a summary. Groups log activity by time interval, showing which sources were active and a sample message per source.
+
+Output shape:
+```json
+[
+  {
+    "interval": "2024-12-30T10:46",
+    "count": 12,
+    "sources": [
+      { "source": "node_controller.go:1056", "count": 10, "sample": "No nodes available" },
+      { "source": "foo.go:42",               "count": 2,  "sample": "connection refused"  }
+    ]
+  }
+]
+```
+- `interval`: truncated timestamp representing the time window
+- `count`: total log lines in the interval across all sources
+- `sources`: sorted by count ascending (most active source last)
+- `sample`: first log message seen from that source in the interval
+
+#### `-interval` (default: `minute`)
+Granularity for `-timeline` mode.
+- `hour` — groups by hour, e.g. `2024-12-30T10`
+- `minute` — groups by minute, e.g. `2024-12-30T10:46`
+- `second` — groups by second, e.g. `2024-12-30T10:46:29`
 
 #### `-pretty` (default: true)
 Enable or disable pretty-printed JSON output.
