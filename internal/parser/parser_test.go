@@ -121,16 +121,16 @@ func TestMalformedJSONCapturedAsUnstructured(t *testing.T) {
 	}
 }
 
-func TestInvalidTimestampReturnsError(t *testing.T) {
+func TestLineWithoutTimestampCapturedAsUnstructured(t *testing.T) {
 	p, _ := New(5, 1, 0)
-	// Line without valid RFC3339Nano timestamp should return error
+	// Lines without a timestamp should be captured as unstructured, not error.
 	r := strings.NewReader("this is not a structured log line\n")
-	err := p.Consume(r)
-	if err == nil {
-		t.Fatal("expected error for invalid timestamp, got nil")
+	if err := p.Consume(r); err != nil {
+		t.Fatalf("Consume: unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "invalid timestamp prefix") {
-		t.Errorf("error = %v, want 'invalid timestamp prefix'", err)
+	summary := p.Summary()
+	if got := len(summary["unstructured"]); got != 1 {
+		t.Errorf("unstructured entries = %d, want 1", got)
 	}
 }
 
@@ -487,16 +487,16 @@ func TestSinceWithOutOfOrderTimestamps(t *testing.T) {
 	}
 }
 
-func TestShortLineReturnsError(t *testing.T) {
+func TestShortLineCapturedAsUnstructured(t *testing.T) {
 	p, _ := New(5, 1, 0)
-	// Line shorter than 31 chars should return error
+	// Lines shorter than 31 chars (no valid timestamp) should be captured as
+	// unstructured, not rejected.
 	r := strings.NewReader("short\n")
-	err := p.Consume(r)
-	if err == nil {
-		t.Fatal("expected error for short line, got nil")
+	if err := p.Consume(r); err != nil {
+		t.Fatalf("Consume: unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "line too short") {
-		t.Errorf("error = %v, want 'line too short'", err)
+	if got := len(p.Summary()["unstructured"]); got != 1 {
+		t.Errorf("unstructured entries = %d, want 1", got)
 	}
 }
 
@@ -867,19 +867,77 @@ func TestTimelineBinCount(t *testing.T) {
 	})
 }
 
-func TestJSONWithoutTimestampReturnsError(t *testing.T) {
+func TestJSONWithoutTimestampPrefixParsedAsEntry(t *testing.T) {
 	p, _ := New(5, 1, 0)
-	// JSON log without timestamp prefix (like when using --timestamps=false)
+	// JSON log without an RFC3339 timestamp prefix should be parsed as a
+	// structured entry (using an empty inherited timestamp), not rejected.
 	line := `{"level":"info","ts":"2026-05-07T08:12:52.589790Z","caller":"mvcc/hash.go:151","msg":"storing new hash"}`
 	r := strings.NewReader(line + "\n")
-	err := p.Consume(r)
-	if err == nil {
-		t.Fatal("expected error for JSON without timestamp prefix, got nil")
+	if err := p.Consume(r); err != nil {
+		t.Fatalf("Consume: unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "invalid timestamp prefix") {
-		t.Errorf("error = %v, want 'invalid timestamp prefix'", err)
+	summary := p.Summary()
+	if got := len(summary["info"]); got != 1 {
+		t.Errorf("info entries = %d, want 1", got)
 	}
-	if !strings.Contains(err.Error(), "did you forget --timestamps=true") {
-		t.Errorf("error = %v, should mention --timestamps=true", err)
+}
+
+// Tests derived from openshift-ovn-kubernetes_ovnkube-node-hsc76_ovnkube-controller.log
+
+func TestRFC3339TimezoneOffsetTimestamp(t *testing.T) {
+	// Log lines with RFC3339 timestamp (no nanoseconds, +HH:MM timezone offset).
+	p, _ := New(5, 1, 0)
+	line := `2026-05-27T15:04:35+00:00 [{cnibincopy}] Copying /usr/libexec/cni/ovn-k8s-cni-overlay to /cni-bin-dir/`
+	if err := p.parseLine(line); err != nil {
+		t.Fatalf("parseLine: %v", err)
+	}
+	summary := p.Summary()
+	if got := len(summary["unstructured"]); got != 1 {
+		t.Errorf("unstructured entries = %d, want 1", got)
+	}
+	if got := summary["unstructured"][0].First[0].Time; got != "2026-05-27T15:04:35+00:00" {
+		t.Errorf("timestamp = %q, want 2026-05-27T15:04:35+00:00", got)
+	}
+}
+
+func TestKlogLineWithoutRFC3339Prefix(t *testing.T) {
+	// klog lines that have no RFC3339 timestamp prefix (bare klog output).
+	p, _ := New(5, 1, 0)
+	// Feed a timestamped line first so lastTimestamp is set.
+	p.parseLine(`2026-05-27T15:04:36+00:00 [{setup}] setting up`)
+	line := `I0527 15:04:36.622646    3694 cert_rotation.go:141] "Starting client certificate rotation controller"`
+	if err := p.parseLine(line); err != nil {
+		t.Fatalf("parseLine: %v", err)
+	}
+	summary := p.Summary()
+	infos := summary["info"]
+	if len(infos) != 1 {
+		t.Fatalf("info entries = %d, want 1", len(infos))
+	}
+	if infos[0].Source != "cert_rotation.go:141" {
+		t.Errorf("source = %q, want cert_rotation.go:141", infos[0].Source)
+	}
+	// Timestamp derived from klog MMDD+time fields, not inherited from prior line.
+	if got := infos[0].First[0].Time; got != "2026-05-27T15:04:36.622646Z" {
+		t.Errorf("derived timestamp = %q, want 2026-05-27T15:04:36.622646Z", got)
+	}
+}
+
+func TestShellTraceLineInheritsTimestamp(t *testing.T) {
+	// Shell xtrace lines (++ cmd) have no timestamp and should inherit the
+	// last seen timestamp and be captured as unstructured.
+	p, _ := New(5, 1, 0)
+	p.parseLine(`2026-05-27T15:04:35+00:00 [{init}] starting`)
+	if err := p.parseLine(`++ K8S_NODE=ip-10-0-67-181.us-west-2.compute.internal`); err != nil {
+		t.Fatalf("parseLine: %v", err)
+	}
+	summary := p.Summary()
+	unstruct := summary["unstructured"]
+	// Two unstructured entries: the [{init}] line and the ++ line.
+	if len(unstruct) != 1 {
+		t.Fatalf("unstructured entries = %d, want 1", len(unstruct))
+	}
+	if got := unstruct[0].First[0].Time; got != "2026-05-27T15:04:35+00:00" {
+		t.Errorf("inherited timestamp = %q, want 2026-05-27T15:04:35+00:00", got)
 	}
 }
