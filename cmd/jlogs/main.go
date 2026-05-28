@@ -29,6 +29,8 @@ func main() {
 	firstN := flag.Int("first-n", 1, "number of first occurrences to retain per source (1-10)")
 	pretty := flag.Bool("pretty", true, "pretty-print the JSON output")
 	since := flag.String("since", "", "filter logs from last N time units (e.g., \"1 hour\", \"2 days\", \"30 minutes\")")
+	timeline := flag.Bool("timeline", false, "emit a timeline view grouped by time interval instead of a summary")
+	interval := flag.String("interval", "minute", "timeline interval granularity: hour, minute, or second")
 	v := flag.Bool("v", false, "print version information")
 	flag.Parse()
 
@@ -66,18 +68,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *timeline {
+		p.SetTimelineInterval(*interval)
+	}
+
 	if err := p.Consume(reader); err != nil {
 		fmt.Fprintf(os.Stderr, "jlogs: %v\n", err)
 		os.Exit(1)
 	}
 
-	summary := p.Summary()
-
 	enc := json.NewEncoder(os.Stdout)
 	if *pretty {
 		enc.SetIndent("", "  ")
 	}
-	if err := enc.Encode(summary); err != nil {
+
+	var output any
+	if *timeline {
+		output = p.Timeline()
+	} else {
+		output = p.Summary()
+	}
+
+	if err := enc.Encode(output); err != nil {
 		fmt.Fprintf(os.Stderr, "jlogs: %v\n", err)
 		os.Exit(1)
 	}

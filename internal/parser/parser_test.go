@@ -633,6 +633,240 @@ func TestUnstructuredKlogUnknownSeverity(t *testing.T) {
 	}
 }
 
+func TestTimelineMinuteBinning(t *testing.T) {
+	p, _ := New(5, 1, 0)
+	p.SetTimelineInterval("minute")
+
+	lines := []string{
+		`2024-12-30T10:46:29.390512670Z I1230 10:46:29.390512  1 node_controller.go:1056] No nodes available`,
+		`2024-12-30T10:46:45.390512670Z I1230 10:46:45.390512  1 node_controller.go:1056] Still no nodes`,
+		`2024-12-30T10:47:01.390512670Z {"level":"error","caller":"foo.go:42","msg":"boom"}`,
+		`2024-12-30T11:01:00.390512670Z I1230 11:01:00.390512  1 node_controller.go:1056] Back online`,
+	}
+	for _, l := range lines {
+		p.parseLine(l)
+	}
+
+	tl := p.Timeline()
+
+	if len(tl) != 3 {
+		t.Fatalf("expected 3 bins, got %d", len(tl))
+	}
+
+	// Bins must be sorted chronologically
+	if tl[0].Interval != "2024-12-30T10:46" {
+		t.Errorf("tl[0].Interval = %q, want 2024-12-30T10:46", tl[0].Interval)
+	}
+	if tl[1].Interval != "2024-12-30T10:47" {
+		t.Errorf("tl[1].Interval = %q, want 2024-12-30T10:47", tl[1].Interval)
+	}
+	if tl[2].Interval != "2024-12-30T11:01" {
+		t.Errorf("tl[2].Interval = %q, want 2024-12-30T11:01", tl[2].Interval)
+	}
+
+	// First bin: 2 messages from node_controller.go:1056
+	if len(tl[0].Sources) != 1 {
+		t.Fatalf("bin[0] sources = %d, want 1", len(tl[0].Sources))
+	}
+	if tl[0].Sources[0].Source != "node_controller.go:1056" {
+		t.Errorf("bin[0] source = %q, want node_controller.go:1056", tl[0].Sources[0].Source)
+	}
+	if tl[0].Sources[0].Count != 2 {
+		t.Errorf("bin[0] source count = %d, want 2", tl[0].Sources[0].Count)
+	}
+	if tl[0].Sources[0].Sample == nil {
+		t.Errorf("bin[0] sample is nil, want a log message")
+	}
+	if tl[0].Count != 2 {
+		t.Errorf("bin[0] total count = %d, want 2", tl[0].Count)
+	}
+
+	// Second bin: 1 error from foo.go:42
+	if len(tl[1].Sources) != 1 {
+		t.Fatalf("bin[1] sources = %d, want 1", len(tl[1].Sources))
+	}
+	if tl[1].Sources[0].Source != "foo.go:42" {
+		t.Errorf("bin[1] source = %q, want foo.go:42", tl[1].Sources[0].Source)
+	}
+}
+
+func TestTimelineHourBinning(t *testing.T) {
+	p, _ := New(5, 1, 0)
+	p.SetTimelineInterval("hour")
+
+	lines := []string{
+		`2024-12-30T10:46:29.390512670Z I1230 10:46:29.390512  1 a.go:1] msg1`,
+		`2024-12-30T10:59:00.390512670Z I1230 10:59:00.390512  1 a.go:1] msg2`,
+		`2024-12-30T11:01:00.390512670Z I1230 11:01:00.390512  1 a.go:1] msg3`,
+	}
+	for _, l := range lines {
+		p.parseLine(l)
+	}
+
+	tl := p.Timeline()
+
+	if len(tl) != 2 {
+		t.Fatalf("expected 2 hour bins, got %d", len(tl))
+	}
+	if tl[0].Interval != "2024-12-30T10" {
+		t.Errorf("bin[0] = %q, want 2024-12-30T10", tl[0].Interval)
+	}
+	if tl[0].Sources[0].Count != 2 {
+		t.Errorf("bin[0] count = %d, want 2", tl[0].Sources[0].Count)
+	}
+	if tl[1].Interval != "2024-12-30T11" {
+		t.Errorf("bin[1] = %q, want 2024-12-30T11", tl[1].Interval)
+	}
+}
+
+func TestTimelineSecondBinning(t *testing.T) {
+	p, _ := New(5, 1, 0)
+	p.SetTimelineInterval("second")
+
+	lines := []string{
+		`2024-12-30T10:46:29.000000000Z I1230 10:46:29.000000  1 a.go:1] msg1`,
+		`2024-12-30T10:46:29.999999999Z I1230 10:46:29.999999  1 a.go:1] msg2`,
+		`2024-12-30T10:46:30.000000000Z I1230 10:46:30.000000  1 a.go:1] msg3`,
+	}
+	for _, l := range lines {
+		p.parseLine(l)
+	}
+
+	tl := p.Timeline()
+
+	if len(tl) != 2 {
+		t.Fatalf("expected 2 second bins, got %d", len(tl))
+	}
+	if tl[0].Interval != "2024-12-30T10:46:29" {
+		t.Errorf("bin[0] = %q, want 2024-12-30T10:46:29", tl[0].Interval)
+	}
+	if tl[0].Sources[0].Count != 2 {
+		t.Errorf("bin[0] count = %d, want 2", tl[0].Sources[0].Count)
+	}
+}
+
+func TestTimelineMultipleSources(t *testing.T) {
+	p, _ := New(5, 1, 0)
+	p.SetTimelineInterval("minute")
+
+	lines := []string{
+		`2024-12-30T10:46:01.000000000Z I1230 10:46:01.000000  1 a.go:1] msg`,
+		`2024-12-30T10:46:02.000000000Z I1230 10:46:02.000000  1 b.go:1] msg`,
+		`2024-12-30T10:46:03.000000000Z I1230 10:46:03.000000  1 a.go:1] msg`,
+		`2024-12-30T10:46:04.000000000Z I1230 10:46:04.000000  1 a.go:1] msg`,
+	}
+	for _, l := range lines {
+		p.parseLine(l)
+	}
+
+	tl := p.Timeline()
+
+	if len(tl) != 1 {
+		t.Fatalf("expected 1 bin, got %d", len(tl))
+	}
+
+	sources := tl[0].Sources
+	if len(sources) != 2 {
+		t.Fatalf("sources = %d, want 2", len(sources))
+	}
+
+	// Sources sorted by count ascending: b.go:1 (1) then a.go:1 (3)
+	if sources[0].Source != "b.go:1" || sources[0].Count != 1 {
+		t.Errorf("sources[0] = {%q, %d}, want {b.go:1, 1}", sources[0].Source, sources[0].Count)
+	}
+	if sources[1].Source != "a.go:1" || sources[1].Count != 3 {
+		t.Errorf("sources[1] = {%q, %d}, want {a.go:1, 3}", sources[1].Source, sources[1].Count)
+	}
+}
+
+func TestTimelineDefaultBinFallback(t *testing.T) {
+	p, _ := New(5, 1, 0)
+	p.SetTimelineInterval("invalid") // should fall back to minute
+
+	lines := []string{
+		`2024-12-30T10:46:01.000000000Z I1230 10:46:01.000000  1 a.go:1] msg1`,
+		`2024-12-30T10:46:59.000000000Z I1230 10:46:59.000000  1 a.go:1] msg2`,
+		`2024-12-30T10:47:00.000000000Z I1230 10:47:00.000000  1 a.go:1] msg3`,
+	}
+	for _, l := range lines {
+		p.parseLine(l)
+	}
+
+	tl := p.Timeline()
+
+	if len(tl) != 2 {
+		t.Fatalf("expected 2 minute bins (fallback), got %d", len(tl))
+	}
+}
+
+func TestTimelineBinCount(t *testing.T) {
+	t.Run("single source", func(t *testing.T) {
+		p, _ := New(5, 1, 0)
+		p.SetTimelineInterval("minute")
+		lines := []string{
+			`2024-12-30T10:46:01.000000000Z I1230 10:46:01.000000  1 a.go:1] msg1`,
+			`2024-12-30T10:46:02.000000000Z I1230 10:46:02.000000  1 a.go:1] msg2`,
+			`2024-12-30T10:46:03.000000000Z I1230 10:46:03.000000  1 a.go:1] msg3`,
+		}
+		for _, l := range lines {
+			p.parseLine(l)
+		}
+		tl := p.Timeline()
+		if len(tl) != 1 {
+			t.Fatalf("expected 1 bin, got %d", len(tl))
+		}
+		if tl[0].Count != 3 {
+			t.Errorf("bin count = %d, want 3", tl[0].Count)
+		}
+	})
+
+	t.Run("multi source same bin", func(t *testing.T) {
+		p, _ := New(5, 1, 0)
+		p.SetTimelineInterval("minute")
+		lines := []string{
+			`2024-12-30T10:46:01.000000000Z I1230 10:46:01.000000  1 a.go:1] msg`,
+			`2024-12-30T10:46:02.000000000Z I1230 10:46:02.000000  1 a.go:1] msg`,
+			`2024-12-30T10:46:03.000000000Z I1230 10:46:03.000000  1 b.go:1] msg`,
+		}
+		for _, l := range lines {
+			p.parseLine(l)
+		}
+		tl := p.Timeline()
+		if len(tl) != 1 {
+			t.Fatalf("expected 1 bin, got %d", len(tl))
+		}
+		// bin count must be sum of all sources: 2 + 1 = 3
+		if tl[0].Count != 3 {
+			t.Errorf("bin count = %d, want 3 (sum across sources)", tl[0].Count)
+		}
+	})
+
+	t.Run("multiple bins independent counts", func(t *testing.T) {
+		p, _ := New(5, 1, 0)
+		p.SetTimelineInterval("minute")
+		lines := []string{
+			`2024-12-30T10:46:01.000000000Z I1230 10:46:01.000000  1 a.go:1] msg`,
+			`2024-12-30T10:46:02.000000000Z I1230 10:46:02.000000  1 b.go:1] msg`,
+			`2024-12-30T10:47:01.000000000Z I1230 10:47:01.000000  1 a.go:1] msg`,
+			`2024-12-30T10:47:02.000000000Z I1230 10:47:02.000000  1 a.go:1] msg`,
+			`2024-12-30T10:47:03.000000000Z I1230 10:47:03.000000  1 a.go:1] msg`,
+		}
+		for _, l := range lines {
+			p.parseLine(l)
+		}
+		tl := p.Timeline()
+		if len(tl) != 2 {
+			t.Fatalf("expected 2 bins, got %d", len(tl))
+		}
+		if tl[0].Interval != "2024-12-30T10:46" || tl[0].Count != 2 {
+			t.Errorf("bin[0] {%q, count=%d}, want {2024-12-30T10:46, count=2}", tl[0].Interval, tl[0].Count)
+		}
+		if tl[1].Interval != "2024-12-30T10:47" || tl[1].Count != 3 {
+			t.Errorf("bin[1] {%q, count=%d}, want {2024-12-30T10:47, count=3}", tl[1].Interval, tl[1].Count)
+		}
+	})
+}
+
 func TestJSONWithoutTimestampReturnsError(t *testing.T) {
 	p, _ := New(5, 1, 0)
 	// JSON log without timestamp prefix (like when using --timestamps=false)

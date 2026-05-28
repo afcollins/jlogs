@@ -107,15 +107,37 @@ var jsonLevelToSeverity = map[string]Severity{
 // Consume, then read the result with Summary. A Parser is not safe for
 // concurrent use; create one per goroutine if you need parallelism.
 type Parser struct {
-	lastN          int
-	firstN         int
-	recentKey      string
-	firstKey       string
-	since          time.Duration // filter logs to last N duration from latest timestamp
-	latestTime     time.Time     // latest timestamp seen during parsing
-	hasLatestTime  bool          // whether we've seen any valid timestamps
+	lastN         int
+	firstN        int
+	recentKey     string
+	firstKey      string
+	since         time.Duration // filter logs to last N duration from latest timestamp
+	latestTime    time.Time     // latest timestamp seen during parsing
+	hasLatestTime bool          // whether we've seen any valid timestamps
 	// buckets[severity][source] -> aggregator
 	buckets map[Severity]map[string]*sourceAggregator
+
+	// timeline fields; populated only when SetTimelineInterval is called
+	timelineInterval string // "hour", "minute", or "second"
+	timelineBuckets  map[string]map[string]*timelineSourceAgg // intervalKey -> source -> agg
+}
+
+// timelineSourceAgg holds the count and one sample message for an (interval, source) pair.
+type timelineSourceAgg struct {
+	count  int
+	sample any
+}
+
+// SetTimelineInterval enables timeline mode with the given granularity.
+// interval must be "hour", "minute", or "second"; anything else is treated as "minute".
+func (p *Parser) SetTimelineInterval(interval string) {
+	switch interval {
+	case "hour", "minute", "second":
+		p.timelineInterval = interval
+	default:
+		p.timelineInterval = "minute"
+	}
+	p.timelineBuckets = make(map[string]map[string]*timelineSourceAgg)
 }
 
 // sourceAggregator tracks running counts, a fixed-size ring of recent
@@ -280,4 +302,41 @@ func (p *Parser) addEntry(sev Severity, source, timestamp string, message any) {
 	if len(agg.first) < agg.firstCap {
 		agg.first = append(agg.first, Occurrence{Time: timestamp, Log: message})
 	}
+
+	if p.timelineInterval != "" {
+		intervalKey := timelineIntervalKey(timestamp, p.timelineInterval)
+		sourceBucket, ok := p.timelineBuckets[intervalKey]
+		if !ok {
+			sourceBucket = make(map[string]*timelineSourceAgg)
+			p.timelineBuckets[intervalKey] = sourceBucket
+		}
+		tagg, ok := sourceBucket[source]
+		if !ok {
+			tagg = &timelineSourceAgg{}
+			sourceBucket[source] = tagg
+		}
+		tagg.count++
+		if tagg.count == 1 {
+			tagg.sample = message
+		}
+	}
+}
+
+// timelineIntervalKey truncates a RFC3339Nano timestamp to the requested granularity.
+func timelineIntervalKey(timestamp, interval string) string {
+	switch interval {
+	case "hour":
+		if len(timestamp) >= 13 {
+			return timestamp[:13]
+		}
+	case "second":
+		if len(timestamp) >= 19 {
+			return timestamp[:19]
+		}
+	}
+	// default: minute
+	if len(timestamp) >= 16 {
+		return timestamp[:16]
+	}
+	return timestamp
 }
