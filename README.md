@@ -111,8 +111,8 @@ Output shape:
     "interval": "2024-12-30T10:46",
     "count": 12,
     "sources": [
-      { "source": "node_controller.go:1056", "count": 10, "sample": "No nodes available" },
-      { "source": "foo.go:42",               "count": 2,  "sample": "connection refused"  }
+      { "source": "foo.go:42",               "severity": "error", "count": 2,  "sample": "connection refused"  },
+      { "source": "node_controller.go:1056",  "severity": "info",  "count": 10, "sample": "No nodes available" }
     ]
   }
 ]
@@ -121,6 +121,37 @@ Output shape:
 - `count`: total log lines in the interval across all sources
 - `sources`: sorted by count ascending (most active source last)
 - `sample`: first log message seen from that source in the interval
+
+#### `-format` (default: `json`)
+Output format for results. Available formats:
+- `json` — structured JSON (default, works with or without `-timeline`)
+- `csv` — one row per (interval, severity, source) tuple; requires `-timeline`
+- `sparkline` — terminal heatmap with Unicode block characters; requires `-timeline`
+
+**CSV example:**
+```bash
+oc logs pod-name --timestamps=true | jlogs -timeline -format csv
+```
+```
+interval,severity,source,count
+2024-12-30T10:46,info,node_controller.go:1056,10
+2024-12-30T10:46,warning,kubelet.go:300,3
+2024-12-30T10:47,info,node_controller.go:1056,32
+```
+
+**Sparkline example:**
+```bash
+oc logs pod-name --timestamps=true | jlogs -timeline -format sparkline
+```
+```
+                                10:46  10:47  10:48  10:49  10:50
+[I] ovs_node.go:512             ▁▃▇███                       (891)
+[I] node_controller.go:1056     ▂▇█▅▂▁                       (142)
+[W] kubelet.go:300              ▁▅█▁▁▁                       (37)
+[E] node_controller.go:1056     ▁▁█▁▁▁                       (8)
+```
+
+Each row is a source, each column a time interval. Block height scales per-row (peak = `█`). Rows sorted by total count descending — noisiest sources at top.
 
 #### `-interval` (default: `minute`)
 Granularity for `-timeline` mode.
