@@ -106,20 +106,21 @@ func TestTimeseriesSparklineBasic(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := p.TimeseriesSparkline(&buf); err != nil {
+	if err := p.TimeseriesSparkline(&buf, false, 0); err != nil {
 		t.Fatalf("TimeseriesSparkline error: %v", err)
 	}
 
 	out := buf.String()
 	outLines := strings.Split(strings.TrimSpace(out), "\n")
 
-	if len(outLines) != 2 {
-		t.Fatalf("expected 2 lines (header + 1 source), got %d:\n%s", len(outLines), out)
+	// header + 1 source row + blank + legend line(s)
+	if len(outLines) < 3 {
+		t.Fatalf("expected at least 3 lines, got %d:\n%s", len(outLines), out)
 	}
 
-	// Header should contain time portions (same date → stripped)
-	if !strings.Contains(outLines[0], "10:46") {
-		t.Errorf("header missing 10:46: %q", outLines[0])
+	// Header should contain marker characters (01 for 2 intervals)
+	if !strings.Contains(outLines[0], "01") {
+		t.Errorf("header missing markers '01': %q", outLines[0])
 	}
 
 	// Source row should contain label, sparkline chars, and total
@@ -129,6 +130,12 @@ func TestTimeseriesSparklineBasic(t *testing.T) {
 	if !strings.Contains(outLines[1], "(4)") {
 		t.Errorf("source row missing total (4): %q", outLines[1])
 	}
+
+	// Legend at bottom should map markers to timestamps
+	legendPart := out[strings.LastIndex(out, "\n0:"):]
+	if !strings.Contains(legendPart, "10:46") || !strings.Contains(legendPart, "10:47") {
+		t.Errorf("legend missing timestamps:\n%s", out)
+	}
 }
 
 func TestTimeseriesSparklineEmpty(t *testing.T) {
@@ -136,7 +143,7 @@ func TestTimeseriesSparklineEmpty(t *testing.T) {
 	p.SetTimelineInterval("minute")
 
 	var buf bytes.Buffer
-	if err := p.TimeseriesSparkline(&buf); err != nil {
+	if err := p.TimeseriesSparkline(&buf, false, 0); err != nil {
 		t.Fatalf("TimeseriesSparkline error: %v", err)
 	}
 
@@ -149,7 +156,7 @@ func TestTimeseriesSparklineOrdering(t *testing.T) {
 	p, _ := New(5, 1, 0)
 	p.SetTimelineInterval("minute")
 
-	// b.go has more total logs than a.go — should appear first
+	// b.go has more total logs than a.go — should appear last (ascending sort)
 	lines := []string{
 		`2024-12-30T10:46:01.000000000Z I1230 10:46:01.000000  1 a.go:1] msg`,
 		`2024-12-30T10:46:02.000000000Z I1230 10:46:02.000000  1 b.go:1] msg`,
@@ -161,15 +168,15 @@ func TestTimeseriesSparklineOrdering(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	p.TimeseriesSparkline(&buf)
+	p.TimeseriesSparkline(&buf, false, 0)
 
 	outLines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	// Skip header (line 0), first source row should be b.go (higher count)
-	if !strings.Contains(outLines[1], "b.go:1") {
-		t.Errorf("first source row should be b.go:1 (highest count), got %q", outLines[1])
+	// Skip header (line 0); ascending sort: a.go (1) first, b.go (3) last before legend
+	if !strings.Contains(outLines[1], "a.go:1") {
+		t.Errorf("first source row should be a.go:1 (lowest count), got %q", outLines[1])
 	}
-	if !strings.Contains(outLines[2], "a.go:1") {
-		t.Errorf("second source row should be a.go:1, got %q", outLines[2])
+	if !strings.Contains(outLines[2], "b.go:1") {
+		t.Errorf("second source row should be b.go:1 (highest count), got %q", outLines[2])
 	}
 }
 
@@ -186,7 +193,7 @@ func TestTimeseriesSparklineMixedSeverities(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	p.TimeseriesSparkline(&buf)
+	p.TimeseriesSparkline(&buf, false, 0)
 
 	out := buf.String()
 	// Same source at different severities → separate rows
@@ -221,21 +228,59 @@ func TestTimeseriesSparklineScaling(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	p.TimeseriesSparkline(&buf)
+	p.TimeseriesSparkline(&buf, false, 0)
 
 	outLines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 
-	// a.go should be first (8 total > 2 total)
-	if !strings.Contains(outLines[1], "[I] a.go:1") {
-		t.Errorf("first row should be a.go:1, got %q", outLines[1])
-	}
-	// a.go sparkline: max=8 in first bin, 0 in second → █▁
-	if !strings.Contains(outLines[1], "█▁") {
-		t.Errorf("a.go sparkline should contain █▁, got %q", outLines[1])
+	// ascending sort: b.go (2 total) first, a.go (8 total) last
+	if !strings.Contains(outLines[1], "[I] b.go:1") {
+		t.Errorf("first row should be b.go:1 (lowest count), got %q", outLines[1])
 	}
 	// b.go sparkline: 1 and 1, both equal max → ██
-	if !strings.Contains(outLines[2], "██") {
-		t.Errorf("b.go sparkline should contain ██, got %q", outLines[2])
+	if !strings.Contains(outLines[1], "██") {
+		t.Errorf("b.go sparkline should contain ██, got %q", outLines[1])
+	}
+	// a.go sparkline: max=8 in first bin, 0 in second → █▁
+	if !strings.Contains(outLines[2], "[I] a.go:1") {
+		t.Errorf("second row should be a.go:1 (highest count), got %q", outLines[2])
+	}
+	if !strings.Contains(outLines[2], "█▁") {
+		t.Errorf("a.go sparkline should contain █▁, got %q", outLines[2])
+	}
+}
+
+func TestTimeseriesSparklineWrap(t *testing.T) {
+	p, _ := New(5, 1, 0)
+	p.SetTimelineInterval("minute")
+
+	// 3 intervals, wrap at width that fits only 2 columns per page
+	lines := []string{
+		`2024-12-30T10:46:01.000000000Z I1230 10:46:01.000000  1 a.go:1] msg`,
+		`2024-12-30T10:47:01.000000000Z I1230 10:47:01.000000  1 a.go:1] msg`,
+		`2024-12-30T10:48:01.000000000Z I1230 10:48:01.000000  1 a.go:1] msg`,
+	}
+	for _, l := range lines {
+		p.parseLine(l)
+	}
+
+	var buf bytes.Buffer
+	// label "[I] a.go:1" = 10 chars + 2 gap = 12 overhead. Width 14 → 2 cols per page.
+	if err := p.TimeseriesSparkline(&buf, true, 14); err != nil {
+		t.Fatalf("TimeseriesSparkline wrap error: %v", err)
+	}
+
+	out := buf.String()
+
+	// Should have 2 pages: first with 2 intervals, second with 1
+	// Each page has header + source row + blank + legend = markers appear twice
+	headerCount := strings.Count(out, "01")
+	if headerCount < 1 {
+		t.Errorf("expected at least 1 page with markers '01', got output:\n%s", out)
+	}
+
+	// Both pages should have legends with timestamps
+	if !strings.Contains(out, "10:46") || !strings.Contains(out, "10:48") {
+		t.Errorf("legend missing timestamps:\n%s", out)
 	}
 }
 

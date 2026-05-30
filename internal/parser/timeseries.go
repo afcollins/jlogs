@@ -69,12 +69,68 @@ func (p *Parser) TimeseriesCSV(w io.Writer) error {
 
 var sparkBlocks = []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 
+const markerChars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+type sourceRow struct {
+	label  string
+	counts []int
+	total  int
+}
+
 // TimeseriesSparkline writes a terminal heatmap with one row per (severity, source),
 // columns per time interval, and Unicode block characters showing intensity.
-// Rows are sorted by total count descending (noisiest first).
+// Rows sorted by total count ascending (noisiest at bottom, near legend).
 // Scaling is per-row so each source's peak is █.
-func (p *Parser) TimeseriesSparkline(w io.Writer) error {
-	// Collect sorted interval keys (columns).
+// Column headers are single alphanumeric markers; a legend at the bottom maps
+// each marker to its timestamp.
+//
+// When wrap is true, output is chunked into pages of maxWidth columns so
+// the display fits in a terminal. Each page repeats the source labels.
+// maxWidth of 0 means no wrapping (same as wrap=false).
+func (p *Parser) TimeseriesSparkline(w io.Writer, wrap bool, maxWidth int) error {
+	intervals, intervalIdx := p.sortedIntervals()
+	if len(intervals) == 0 {
+		return nil
+	}
+
+	rows := p.collectSparklineRows(intervals, intervalIdx)
+
+	maxLabel := 0
+	for _, sr := range rows {
+		if len(sr.label) > maxLabel {
+			maxLabel = len(sr.label)
+		}
+	}
+
+	// labelOverhead: label + "  " gap + "  (N)\n" suffix.
+	// We only need the label + gap for computing available columns.
+	labelOverhead := maxLabel + 2
+
+	if !wrap || maxWidth <= 0 {
+		return p.writeSparklinePage(w, rows, intervals, 0, len(intervals), maxLabel)
+	}
+
+	colsPerPage := maxWidth - labelOverhead
+	if colsPerPage < 1 {
+		colsPerPage = 1
+	}
+
+	for start := 0; start < len(intervals); start += colsPerPage {
+		end := start + colsPerPage
+		if end > len(intervals) {
+			end = len(intervals)
+		}
+		if start > 0 {
+			fmt.Fprintln(w)
+		}
+		if err := p.writeSparklinePage(w, rows, intervals, start, end, maxLabel); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *Parser) sortedIntervals() ([]string, map[string]int) {
 	intervalSet := make(map[string]struct{})
 	for k := range p.timelineBuckets {
 		intervalSet[k] = struct{}{}
@@ -85,22 +141,14 @@ func (p *Parser) TimeseriesSparkline(w io.Writer) error {
 	}
 	sort.Strings(intervals)
 
-	if len(intervals) == 0 {
-		return nil
-	}
-
 	intervalIdx := make(map[string]int, len(intervals))
 	for i, k := range intervals {
 		intervalIdx[k] = i
 	}
+	return intervals, intervalIdx
+}
 
-	// Collect per-(severity, source) counts across all intervals.
-	type sourceRow struct {
-		label  string
-		counts []int
-		total  int
-	}
-
+func (p *Parser) collectSparklineRows(intervals []string, intervalIdx map[string]int) []*sourceRow {
 	rowMap := make(map[timelineBucketKey]*sourceRow)
 	for intervalKey, sourceBucket := range p.timelineBuckets {
 		idx := intervalIdx[intervalKey]
@@ -125,26 +173,22 @@ func (p *Parser) TimeseriesSparkline(w io.Writer) error {
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].total != rows[j].total {
-			return rows[i].total > rows[j].total
+			return rows[i].total < rows[j].total
 		}
 		return rows[i].label < rows[j].label
 	})
+	return rows
+}
 
-	// Compute label padding width.
-	maxLabel := 0
-	for _, sr := range rows {
-		if len(sr.label) > maxLabel {
-			maxLabel = len(sr.label)
-		}
-	}
+// writeSparklinePage writes one page of the sparkline covering intervals[start:end].
+func (p *Parser) writeSparklinePage(w io.Writer, rows []*sourceRow, intervals []string, start, end, maxLabel int) error {
+	pageIntervals := intervals[start:end]
+	markers := assignMarkers(len(pageIntervals))
 
-	// Format interval headers — strip common date prefix if all intervals share it.
-	headers := formatIntervalHeaders(intervals)
+	// Header row.
+	fmt.Fprintf(w, "%s  %s\n", pad("", maxLabel), markers)
 
-	// Print header row.
-	fmt.Fprintf(w, "%s  %s\n", pad("", maxLabel), strings.Join(headers, ""))
-
-	// Print each source row.
+	// Source rows — sparkline uses only the page's column slice.
 	for _, sr := range rows {
 		maxCount := 0
 		for _, c := range sr.counts {
@@ -154,11 +198,18 @@ func (p *Parser) TimeseriesSparkline(w io.Writer) error {
 		}
 
 		var spark strings.Builder
-		for _, c := range sr.counts {
+		for _, c := range sr.counts[start:end] {
 			spark.WriteRune(scaleBlock(c, maxCount))
 		}
 
 		fmt.Fprintf(w, "%s  %s  (%d)\n", pad(sr.label, maxLabel), spark.String(), sr.total)
+	}
+
+	// Legend.
+	fmt.Fprintln(w)
+	legend := formatLegend(markers, pageIntervals)
+	for _, line := range legend {
+		fmt.Fprintln(w, line)
 	}
 
 	return nil
@@ -179,14 +230,18 @@ func pad(s string, width int) string {
 	return s + strings.Repeat(" ", width-len(s))
 }
 
-// formatIntervalHeaders shortens interval labels when all share a common date prefix.
-// Each label is right-padded to a uniform width for column alignment.
-func formatIntervalHeaders(intervals []string) []string {
-	if len(intervals) == 0 {
-		return nil
+func assignMarkers(n int) string {
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		b.WriteByte(markerChars[i%len(markerChars)])
 	}
+	return b.String()
+}
 
-	// Find common prefix up to 'T' (date portion).
+// formatLegend builds lines mapping each marker character to its interval timestamp.
+// Strips common date prefix when all intervals share the same date.
+func formatLegend(markers string, intervals []string) []string {
+	display := make([]string, len(intervals))
 	first := intervals[0]
 	tIdx := strings.IndexByte(first, 'T')
 	allSameDate := tIdx >= 0
@@ -199,27 +254,33 @@ func formatIntervalHeaders(intervals []string) []string {
 			}
 		}
 	}
-
-	headers := make([]string, len(intervals))
 	for i, iv := range intervals {
 		if allSameDate && tIdx >= 0 {
-			headers[i] = iv[tIdx+1:]
+			display[i] = iv[tIdx+1:]
 		} else {
-			headers[i] = iv
+			display[i] = iv
 		}
 	}
 
-	// Pad all headers to same width for alignment.
 	maxW := 0
-	for _, h := range headers {
-		if len(h) > maxW {
-			maxW = len(h)
+	for _, d := range display {
+		if len(d) > maxW {
+			maxW = len(d)
 		}
 	}
-	colWidth := maxW + 1
-	for i, h := range headers {
-		headers[i] = pad(h, colWidth)
-	}
 
-	return headers
+	const perLine = 5
+	var lines []string
+	for i := 0; i < len(intervals); i += perLine {
+		end := i + perLine
+		if end > len(intervals) {
+			end = len(intervals)
+		}
+		var parts []string
+		for j := i; j < end; j++ {
+			parts = append(parts, fmt.Sprintf("%c: %s", markers[j], pad(display[j], maxW)))
+		}
+		lines = append(lines, strings.Join(parts, "  "))
+	}
+	return lines
 }

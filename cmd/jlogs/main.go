@@ -20,8 +20,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gmeghnag/jlogs/internal/parser"
 	"github.com/gmeghnag/jlogs/cmd/jlogs/version"
+	"github.com/gmeghnag/jlogs/internal/parser"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -32,6 +33,8 @@ func main() {
 	timeline := flag.Bool("timeline", false, "emit a timeline view grouped by time interval instead of a summary")
 	interval := flag.String("interval", "minute", "timeline interval granularity: hour, minute, or second")
 	format := flag.String("format", "json", "output format: json, csv, sparkline")
+	wrap := flag.Bool("wrap", false, "wrap sparkline output to fit terminal width")
+	width := flag.Int("w", 0, "terminal width for sparkline wrapping (0 = auto-detect)")
 	v := flag.Bool("v", false, "print version information")
 	flag.Parse()
 
@@ -104,7 +107,11 @@ func main() {
 		if *format == "csv" {
 			err = p.TimeseriesCSV(os.Stdout)
 		} else {
-			err = p.TimeseriesSparkline(os.Stdout)
+			w := *width
+			if *wrap && w == 0 {
+				w = detectTerminalWidth()
+			}
+			err = p.TimeseriesSparkline(os.Stdout, *wrap, w)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "jlogs: %v\n", err)
@@ -166,4 +173,12 @@ func parseSince(s string) (time.Duration, error) {
 	default:
 		return 0, fmt.Errorf("unsupported unit: %s", unit)
 	}
+}
+
+func detectTerminalWidth() int {
+	w, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || w <= 0 {
+		return 80
+	}
+	return w
 }
