@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -920,6 +921,68 @@ func TestKlogLineWithoutRFC3339Prefix(t *testing.T) {
 	// Timestamp derived from klog MMDD+time fields, not inherited from prior line.
 	if got := infos[0].First[0].Time; got != "2026-05-27T15:04:36.622646Z" {
 		t.Errorf("derived timestamp = %q, want 2026-05-27T15:04:36.622646Z", got)
+	}
+}
+
+func TestTimelineJSONShape(t *testing.T) {
+	p, _ := New(5, 1, 0)
+	p.SetTimelineInterval("minute")
+
+	lines := []string{
+		`2024-12-30T10:46:01.000000000Z I1230 10:46:01.000000  1 a.go:1] info msg`,
+		`2024-12-30T10:46:02.000000000Z E1230 10:46:02.000000  1 a.go:1] error msg`,
+		`2024-12-30T10:47:01.000000000Z I1230 10:47:01.000000  1 b.go:5] other`,
+	}
+	for _, l := range lines {
+		p.parseLine(l)
+	}
+
+	tl := p.Timeline()
+	data, err := json.Marshal(tl)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	var raw []map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	if len(raw) != 2 {
+		t.Fatalf("expected 2 intervals, got %d", len(raw))
+	}
+
+	// Verify first interval has expected keys
+	first := raw[0]
+	for _, key := range []string{"interval", "count", "sources"} {
+		if _, ok := first[key]; !ok {
+			t.Errorf("missing key %q in interval object", key)
+		}
+	}
+
+	// Verify sources have severity field
+	sources := first["sources"].([]any)
+	if len(sources) != 2 {
+		t.Fatalf("expected 2 sources in first interval (info+error for a.go:1), got %d", len(sources))
+	}
+
+	for i, s := range sources {
+		src := s.(map[string]any)
+		for _, key := range []string{"source", "severity", "count", "sample"} {
+			if _, ok := src[key]; !ok {
+				t.Errorf("sources[%d]: missing key %q", i, key)
+			}
+		}
+	}
+
+	// Verify severity values are present and correct
+	sevSet := map[string]bool{}
+	for _, s := range sources {
+		src := s.(map[string]any)
+		sevSet[src["severity"].(string)] = true
+	}
+	if !sevSet["info"] || !sevSet["error"] {
+		t.Errorf("expected info and error severities, got %v", sevSet)
 	}
 }
 

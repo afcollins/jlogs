@@ -119,11 +119,15 @@ type Parser struct {
 	buckets map[Severity]map[string]*sourceAggregator
 
 	// timeline fields; populated only when SetTimelineInterval is called
-	timelineInterval string // "hour", "minute", or "second"
-	timelineBuckets  map[string]map[string]*timelineSourceAgg // intervalKey -> source -> agg
+	timelineInterval string                                              // "hour", "minute", or "second"
+	timelineBuckets  map[string]map[timelineBucketKey]*timelineSourceAgg // intervalKey -> (severity, source) -> agg
 }
 
-// timelineSourceAgg holds the count and one sample message for an (interval, source) pair.
+type timelineBucketKey struct {
+	severity Severity
+	source   string
+}
+
 type timelineSourceAgg struct {
 	count  int
 	sample any
@@ -138,7 +142,7 @@ func (p *Parser) SetTimelineInterval(interval string) {
 	default:
 		p.timelineInterval = "minute"
 	}
-	p.timelineBuckets = make(map[string]map[string]*timelineSourceAgg)
+	p.timelineBuckets = make(map[string]map[timelineBucketKey]*timelineSourceAgg)
 }
 
 // sourceAggregator tracks running counts, a fixed-size ring of recent
@@ -308,13 +312,14 @@ func (p *Parser) addEntry(sev Severity, source, timestamp string, message any) {
 		intervalKey := timelineIntervalKey(timestamp, p.timelineInterval)
 		sourceBucket, ok := p.timelineBuckets[intervalKey]
 		if !ok {
-			sourceBucket = make(map[string]*timelineSourceAgg)
+			sourceBucket = make(map[timelineBucketKey]*timelineSourceAgg)
 			p.timelineBuckets[intervalKey] = sourceBucket
 		}
-		tagg, ok := sourceBucket[source]
+		key := timelineBucketKey{severity: sev, source: source}
+		tagg, ok := sourceBucket[key]
 		if !ok {
 			tagg = &timelineSourceAgg{}
-			sourceBucket[source] = tagg
+			sourceBucket[key] = tagg
 		}
 		tagg.count++
 		if tagg.count == 1 {

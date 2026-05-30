@@ -31,6 +31,7 @@ func main() {
 	since := flag.String("since", "", "filter logs from last N time units (e.g., \"1 hour\", \"2 days\", \"30 minutes\")")
 	timeline := flag.Bool("timeline", false, "emit a timeline view grouped by time interval instead of a summary")
 	interval := flag.String("interval", "minute", "timeline interval granularity: hour, minute, or second")
+	format := flag.String("format", "json", "output format: json, csv, sparkline")
 	v := flag.Bool("v", false, "print version information")
 	flag.Parse()
 
@@ -77,20 +78,41 @@ func main() {
 		os.Exit(1)
 	}
 
-	enc := json.NewEncoder(os.Stdout)
-	if *pretty {
-		enc.SetIndent("", "  ")
-	}
+	switch *format {
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		if *pretty {
+			enc.SetIndent("", "  ")
+		}
+		var output any
+		if *timeline {
+			output = p.Timeline()
+		} else {
+			output = p.Summary()
+		}
+		if err := enc.Encode(output); err != nil {
+			fmt.Fprintf(os.Stderr, "jlogs: %v\n", err)
+			os.Exit(1)
+		}
 
-	var output any
-	if *timeline {
-		output = p.Timeline()
-	} else {
-		output = p.Summary()
-	}
+	case "csv", "sparkline":
+		if !*timeline {
+			fmt.Fprintf(os.Stderr, "jlogs: -format %s requires -timeline\n", *format)
+			os.Exit(1)
+		}
+		var err error
+		if *format == "csv" {
+			err = p.TimeseriesCSV(os.Stdout)
+		} else {
+			err = p.TimeseriesSparkline(os.Stdout)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "jlogs: %v\n", err)
+			os.Exit(1)
+		}
 
-	if err := enc.Encode(output); err != nil {
-		fmt.Fprintf(os.Stderr, "jlogs: %v\n", err)
+	default:
+		fmt.Fprintf(os.Stderr, "jlogs: unknown format %q (valid: json, csv, sparkline)\n", *format)
 		os.Exit(1)
 	}
 }

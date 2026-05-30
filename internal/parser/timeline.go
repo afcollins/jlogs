@@ -11,9 +11,10 @@ type TimelineEntry struct {
 
 // TimelineSource is a single source's activity within a time interval.
 type TimelineSource struct {
-	Source string `json:"source"`
-	Count  int    `json:"count"`
-	Sample any    `json:"sample"`
+	Source   string `json:"source"`
+	Severity string `json:"severity"`
+	Count    int    `json:"count"`
+	Sample   any    `json:"sample"`
 }
 
 // Timeline builds the timeline report from accumulated state.
@@ -25,12 +26,13 @@ func (p *Parser) Timeline() []TimelineEntry {
 	for intervalKey, sourceBucket := range p.timelineBuckets {
 		sources := make([]TimelineSource, 0, len(sourceBucket))
 		total := 0
-		for source, agg := range sourceBucket {
+		for key, agg := range sourceBucket {
 			total += agg.count
 			sources = append(sources, TimelineSource{
-				Source: source,
-				Count:  agg.count,
-				Sample: agg.sample,
+				Source:   key.source,
+				Severity: string(key.severity),
+				Count:    agg.count,
+				Sample:   agg.sample,
 			})
 		}
 		sort.Slice(sources, func(i, j int) bool {
