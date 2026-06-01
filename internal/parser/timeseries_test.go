@@ -106,34 +106,35 @@ func TestTimeseriesSparklineBasic(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := p.TimeseriesSparkline(&buf, false, 0); err != nil {
+	if err := p.TimeseriesSparkline(&buf, SparklineOptions{}); err != nil {
 		t.Fatalf("TimeseriesSparkline error: %v", err)
 	}
 
 	out := buf.String()
 	outLines := strings.Split(strings.TrimSpace(out), "\n")
 
-	// header + 1 source row + blank + legend line(s)
+	// source row + marker row + blank + legend line(s)
 	if len(outLines) < 3 {
 		t.Fatalf("expected at least 3 lines, got %d:\n%s", len(outLines), out)
 	}
 
-	// Header should contain marker characters (01 for 2 intervals)
-	if !strings.Contains(outLines[0], "01") {
-		t.Errorf("header missing markers '01': %q", outLines[0])
+	// Source row (first data line) should contain label and total
+	if !strings.Contains(outLines[0], "[I] a.go:1") {
+		t.Errorf("source row missing label: %q", outLines[0])
+	}
+	if !strings.Contains(outLines[0], "(4)") {
+		t.Errorf("source row missing total (4): %q", outLines[0])
 	}
 
-	// Source row should contain label, sparkline chars, and total
-	if !strings.Contains(outLines[1], "[I] a.go:1") {
-		t.Errorf("source row missing label: %q", outLines[1])
-	}
-	if !strings.Contains(outLines[1], "(4)") {
-		t.Errorf("source row missing total (4): %q", outLines[1])
+	// Marker row should have exactly 2 characters (2 intervals)
+	// Markers are shuffled so we just check the row has 2 non-space marker chars
+	markerLine := strings.TrimSpace(outLines[1])
+	if len(markerLine) != 2 {
+		t.Errorf("marker row should have 2 chars, got %d: %q", len(markerLine), markerLine)
 	}
 
-	// Legend at bottom should map markers to timestamps
-	legendPart := out[strings.LastIndex(out, "\n0:"):]
-	if !strings.Contains(legendPart, "10:46") || !strings.Contains(legendPart, "10:47") {
+	// Legend should contain timestamps
+	if !strings.Contains(out, "10:46") || !strings.Contains(out, "10:47") {
 		t.Errorf("legend missing timestamps:\n%s", out)
 	}
 }
@@ -143,7 +144,7 @@ func TestTimeseriesSparklineEmpty(t *testing.T) {
 	p.SetTimelineInterval("minute")
 
 	var buf bytes.Buffer
-	if err := p.TimeseriesSparkline(&buf, false, 0); err != nil {
+	if err := p.TimeseriesSparkline(&buf, SparklineOptions{}); err != nil {
 		t.Fatalf("TimeseriesSparkline error: %v", err)
 	}
 
@@ -168,15 +169,15 @@ func TestTimeseriesSparklineOrdering(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	p.TimeseriesSparkline(&buf, false, 0)
+	p.TimeseriesSparkline(&buf, SparklineOptions{})
 
 	outLines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	// Skip header (line 0); ascending sort: a.go (1) first, b.go (3) last before legend
-	if !strings.Contains(outLines[1], "a.go:1") {
-		t.Errorf("first source row should be a.go:1 (lowest count), got %q", outLines[1])
+	// Source rows come first; ascending sort: a.go (1) first, b.go (3) last
+	if !strings.Contains(outLines[0], "a.go:1") {
+		t.Errorf("first source row should be a.go:1 (lowest count), got %q", outLines[0])
 	}
-	if !strings.Contains(outLines[2], "b.go:1") {
-		t.Errorf("second source row should be b.go:1 (highest count), got %q", outLines[2])
+	if !strings.Contains(outLines[1], "b.go:1") {
+		t.Errorf("second source row should be b.go:1 (highest count), got %q", outLines[1])
 	}
 }
 
@@ -193,7 +194,7 @@ func TestTimeseriesSparklineMixedSeverities(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	p.TimeseriesSparkline(&buf, false, 0)
+	p.TimeseriesSparkline(&buf, SparklineOptions{})
 
 	out := buf.String()
 	// Same source at different severities → separate rows
@@ -228,24 +229,23 @@ func TestTimeseriesSparklineScaling(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	p.TimeseriesSparkline(&buf, false, 0)
+	p.TimeseriesSparkline(&buf, SparklineOptions{})
 
 	outLines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 
 	// ascending sort: b.go (2 total) first, a.go (8 total) last
-	if !strings.Contains(outLines[1], "[I] b.go:1") {
-		t.Errorf("first row should be b.go:1 (lowest count), got %q", outLines[1])
+	// source rows come before marker row
+	if !strings.Contains(outLines[0], "[I] b.go:1") {
+		t.Errorf("first row should be b.go:1 (lowest count), got %q", outLines[0])
 	}
-	// b.go sparkline: 1 and 1, both equal max → ██
-	if !strings.Contains(outLines[1], "██") {
-		t.Errorf("b.go sparkline should contain ██, got %q", outLines[1])
+	if !strings.Contains(outLines[0], "██") {
+		t.Errorf("b.go sparkline should contain ██, got %q", outLines[0])
 	}
-	// a.go sparkline: max=8 in first bin, 0 in second → █▁
-	if !strings.Contains(outLines[2], "[I] a.go:1") {
-		t.Errorf("second row should be a.go:1 (highest count), got %q", outLines[2])
+	if !strings.Contains(outLines[1], "[I] a.go:1") {
+		t.Errorf("second row should be a.go:1 (highest count), got %q", outLines[1])
 	}
-	if !strings.Contains(outLines[2], "█▁") {
-		t.Errorf("a.go sparkline should contain █▁, got %q", outLines[2])
+	if !strings.Contains(outLines[1], "█▁") {
+		t.Errorf("a.go sparkline should contain █▁, got %q", outLines[1])
 	}
 }
 
@@ -265,22 +265,93 @@ func TestTimeseriesSparklineWrap(t *testing.T) {
 
 	var buf bytes.Buffer
 	// label "[I] a.go:1" = 10 chars + 2 gap = 12 overhead. Width 14 → 2 cols per page.
-	if err := p.TimeseriesSparkline(&buf, true, 14); err != nil {
+	if err := p.TimeseriesSparkline(&buf, SparklineOptions{Wrap: true, MaxWidth: 14}); err != nil {
 		t.Fatalf("TimeseriesSparkline wrap error: %v", err)
 	}
 
 	out := buf.String()
 
-	// Should have 2 pages: first with 2 intervals, second with 1
-	// Each page has header + source row + blank + legend = markers appear twice
-	headerCount := strings.Count(out, "01")
-	if headerCount < 1 {
-		t.Errorf("expected at least 1 page with markers '01', got output:\n%s", out)
-	}
-
-	// Both pages should have legends with timestamps
+	// Should have 2 pages with legends
 	if !strings.Contains(out, "10:46") || !strings.Contains(out, "10:48") {
 		t.Errorf("legend missing timestamps:\n%s", out)
+	}
+}
+
+func TestTimeseriesSparklineSourceFilter(t *testing.T) {
+	p, _ := New(5, 1, 0)
+	p.SetTimelineInterval("minute")
+
+	lines := []string{
+		`2024-12-30T10:46:01.000000000Z I1230 10:46:01.000000  1 a.go:1] msg`,
+		`2024-12-30T10:46:02.000000000Z I1230 10:46:02.000000  1 b.go:1] msg`,
+	}
+	for _, l := range lines {
+		p.parseLine(l)
+	}
+
+	var buf bytes.Buffer
+	p.TimeseriesSparkline(&buf, SparklineOptions{Source: "a.go"})
+
+	out := buf.String()
+	if !strings.Contains(out, "a.go:1") {
+		t.Errorf("output should contain a.go:1:\n%s", out)
+	}
+	if strings.Contains(out, "b.go:1") {
+		t.Errorf("output should not contain b.go:1:\n%s", out)
+	}
+}
+
+func TestTimeseriesSparklineZoomTimestamp(t *testing.T) {
+	p, _ := New(5, 1, 0)
+	p.SetTimelineInterval("minute")
+
+	lines := []string{
+		`2024-12-30T10:46:01.000000000Z I1230 10:46:01.000000  1 a.go:1] msg`,
+		`2024-12-30T10:47:01.000000000Z I1230 10:47:01.000000  1 a.go:1] msg`,
+		`2024-12-30T10:48:01.000000000Z I1230 10:48:01.000000  1 a.go:1] msg`,
+	}
+	for _, l := range lines {
+		p.parseLine(l)
+	}
+
+	var buf bytes.Buffer
+	p.TimeseriesSparkline(&buf, SparklineOptions{Zoom: "10:46-10:47"})
+
+	out := buf.String()
+	if !strings.Contains(out, "10:46") || !strings.Contains(out, "10:47") {
+		t.Errorf("zoomed output should contain 10:46 and 10:47:\n%s", out)
+	}
+	if strings.Contains(out, "10:48") {
+		t.Errorf("zoomed output should not contain 10:48:\n%s", out)
+	}
+}
+
+func TestTimeseriesSparklineZoomMarkers(t *testing.T) {
+	p, _ := New(5, 1, 0)
+	p.SetTimelineInterval("minute")
+
+	lines := []string{
+		`2024-12-30T10:46:01.000000000Z I1230 10:46:01.000000  1 a.go:1] msg`,
+		`2024-12-30T10:47:01.000000000Z I1230 10:47:01.000000  1 a.go:1] msg`,
+		`2024-12-30T10:48:01.000000000Z I1230 10:48:01.000000  1 a.go:1] msg`,
+	}
+	for _, l := range lines {
+		p.parseLine(l)
+	}
+
+	// Get the full markers first.
+	markers := shuffleMarkers(3)
+
+	// Zoom to first 2 markers.
+	sub := markers[:2]
+
+	var buf bytes.Buffer
+	p.TimeseriesSparkline(&buf, SparklineOptions{Zoom: sub})
+
+	out := buf.String()
+	// Should show exactly 2 intervals.
+	if !strings.Contains(out, "10:46") || !strings.Contains(out, "10:47") {
+		t.Errorf("zoomed output should contain first 2 intervals:\n%s", out)
 	}
 }
 

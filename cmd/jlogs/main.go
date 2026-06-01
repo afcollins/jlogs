@@ -35,6 +35,8 @@ func main() {
 	format := flag.String("format", "json", "output format: json, csv, sparkline")
 	wrap := flag.Bool("wrap", false, "wrap sparkline output to fit terminal width")
 	width := flag.Int("w", 0, "terminal width for sparkline wrapping (0 = auto-detect)")
+	zoom := flag.String("zoom", "", "zoom into intervals by marker substring or timestamp range (e.g., \"xR3\" or \"15:30-15:45\")")
+	source := flag.String("source", "", "filter sparkline to sources containing this substring")
 	v := flag.Bool("v", false, "print version information")
 	flag.Parse()
 
@@ -111,7 +113,12 @@ func main() {
 			if *wrap && w == 0 {
 				w = detectTerminalWidth()
 			}
-			err = p.TimeseriesSparkline(os.Stdout, *wrap, w)
+			err = p.TimeseriesSparkline(os.Stdout, parser.SparklineOptions{
+				Wrap:     *wrap,
+				MaxWidth: w,
+				Zoom:     *zoom,
+				Source:   *source,
+			})
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "jlogs: %v\n", err)

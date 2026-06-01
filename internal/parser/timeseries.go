@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -77,23 +78,74 @@ type sourceRow struct {
 	total  int
 }
 
+// SparklineOptions controls sparkline output behavior.
+type SparklineOptions struct {
+	Wrap     bool
+	MaxWidth int
+	Zoom     string // marker substring or "HH:MM-HH:MM" timestamp range
+	Source   string // substring filter on source labels
+}
+
 // TimeseriesSparkline writes a terminal heatmap with one row per (severity, source),
 // columns per time interval, and Unicode block characters showing intensity.
 // Rows sorted by total count ascending (noisiest at bottom, near legend).
 // Scaling is per-row so each source's peak is █.
-// Column headers are single alphanumeric markers; a legend at the bottom maps
-// each marker to its timestamp.
-//
-// When wrap is true, output is chunked into pages of maxWidth columns so
-// the display fits in a terminal. Each page repeats the source labels.
-// maxWidth of 0 means no wrapping (same as wrap=false).
-func (p *Parser) TimeseriesSparkline(w io.Writer, wrap bool, maxWidth int) error {
+// Column headers are shuffled alphanumeric markers; a legend at the bottom maps
+// each marker to its timestamp. Markers are shuffled so any 3-4 char substring
+// is a unique fingerprint that can be copied for -zoom.
+func (p *Parser) TimeseriesSparkline(w io.Writer, opts SparklineOptions) error {
 	intervals, intervalIdx := p.sortedIntervals()
 	if len(intervals) == 0 {
 		return nil
 	}
 
+	// Assign shuffled markers to all intervals.
+	allMarkers := shuffleMarkers(len(intervals))
+
+	// Apply zoom filter if specified.
+	if opts.Zoom != "" {
+		var zoomIndices []int
+		if isTimestampRange(opts.Zoom) {
+			zoomIndices = filterByTimestampRange(intervals, opts.Zoom)
+		} else {
+			zoomIndices = filterByMarkerSubstring(allMarkers, opts.Zoom)
+		}
+		if len(zoomIndices) == 0 {
+			fmt.Fprintf(w, "no intervals match zoom %q\n", opts.Zoom)
+			return nil
+		}
+		// Rebuild intervals and markers for the zoomed subset.
+		newIntervals := make([]string, len(zoomIndices))
+		var newMarkers strings.Builder
+		for i, idx := range zoomIndices {
+			newIntervals[i] = intervals[idx]
+			newMarkers.WriteByte(allMarkers[idx])
+		}
+		intervals = newIntervals
+		allMarkers = newMarkers.String()
+		// Rebuild intervalIdx for the filtered set.
+		intervalIdx = make(map[string]int, len(intervals))
+		for i, k := range intervals {
+			intervalIdx[k] = i
+		}
+	}
+
 	rows := p.collectSparklineRows(intervals, intervalIdx)
+
+	// Apply source filter.
+	if opts.Source != "" {
+		filtered := rows[:0]
+		for _, sr := range rows {
+			if strings.Contains(sr.label, opts.Source) {
+				filtered = append(filtered, sr)
+			}
+		}
+		rows = filtered
+		if len(rows) == 0 {
+			fmt.Fprintf(w, "no sources match %q\n", opts.Source)
+			return nil
+		}
+	}
 
 	maxLabel := 0
 	for _, sr := range rows {
@@ -102,15 +154,13 @@ func (p *Parser) TimeseriesSparkline(w io.Writer, wrap bool, maxWidth int) error
 		}
 	}
 
-	// labelOverhead: label + "  " gap + "  (N)\n" suffix.
-	// We only need the label + gap for computing available columns.
 	labelOverhead := maxLabel + 2
 
-	if !wrap || maxWidth <= 0 {
-		return p.writeSparklinePage(w, rows, intervals, 0, len(intervals), maxLabel)
+	if !opts.Wrap || opts.MaxWidth <= 0 {
+		return writeSparklinePage(w, rows, intervals, allMarkers, 0, len(intervals), maxLabel)
 	}
 
-	colsPerPage := maxWidth - labelOverhead
+	colsPerPage := opts.MaxWidth - labelOverhead
 	if colsPerPage < 1 {
 		colsPerPage = 1
 	}
@@ -123,7 +173,7 @@ func (p *Parser) TimeseriesSparkline(w io.Writer, wrap bool, maxWidth int) error
 		if start > 0 {
 			fmt.Fprintln(w)
 		}
-		if err := p.writeSparklinePage(w, rows, intervals, start, end, maxLabel); err != nil {
+		if err := writeSparklinePage(w, rows, intervals, allMarkers, start, end, maxLabel); err != nil {
 			return err
 		}
 	}
@@ -151,7 +201,10 @@ func (p *Parser) sortedIntervals() ([]string, map[string]int) {
 func (p *Parser) collectSparklineRows(intervals []string, intervalIdx map[string]int) []*sourceRow {
 	rowMap := make(map[timelineBucketKey]*sourceRow)
 	for intervalKey, sourceBucket := range p.timelineBuckets {
-		idx := intervalIdx[intervalKey]
+		idx, ok := intervalIdx[intervalKey]
+		if !ok {
+			continue
+		}
 		for key, agg := range sourceBucket {
 			sr, ok := rowMap[key]
 			if !ok {
@@ -181,14 +234,10 @@ func (p *Parser) collectSparklineRows(intervals []string, intervalIdx map[string
 }
 
 // writeSparklinePage writes one page of the sparkline covering intervals[start:end].
-func (p *Parser) writeSparklinePage(w io.Writer, rows []*sourceRow, intervals []string, start, end, maxLabel int) error {
-	pageIntervals := intervals[start:end]
-	markers := assignMarkers(len(pageIntervals))
+func writeSparklinePage(w io.Writer, rows []*sourceRow, intervals []string, allMarkers string, start, end, maxLabel int) error {
+	pageMarkers := allMarkers[start:end]
 
-	// Header row.
-	fmt.Fprintf(w, "%s  %s\n", pad("", maxLabel), markers)
-
-	// Source rows — sparkline uses only the page's column slice.
+	// Source rows.
 	for _, sr := range rows {
 		maxCount := 0
 		for _, c := range sr.counts {
@@ -205,9 +254,13 @@ func (p *Parser) writeSparklinePage(w io.Writer, rows []*sourceRow, intervals []
 		fmt.Fprintf(w, "%s  %s  (%d)\n", pad(sr.label, maxLabel), spark.String(), sr.total)
 	}
 
+	// Marker row at bottom.
+	fmt.Fprintf(w, "%s  %s\n", pad("", maxLabel), pageMarkers)
+
 	// Legend.
 	fmt.Fprintln(w)
-	legend := formatLegend(markers, pageIntervals)
+	pageIntervals := intervals[start:end]
+	legend := formatLegend(pageMarkers, pageIntervals)
 	for _, line := range legend {
 		fmt.Fprintln(w, line)
 	}
@@ -230,12 +283,76 @@ func pad(s string, width int) string {
 	return s + strings.Repeat(" ", width-len(s))
 }
 
-func assignMarkers(n int) string {
+// shuffleMarkers generates a deterministic pseudo-random sequence of marker
+// characters for n intervals. The shuffle ensures that any 3-4 character
+// substring is very likely unique, allowing users to copy a range from the
+// sparkline and use it with -zoom.
+func shuffleMarkers(n int) string {
+	chars := []byte(markerChars)
+	rng := rand.New(rand.NewSource(42))
+	rng.Shuffle(len(chars), func(i, j int) {
+		chars[i], chars[j] = chars[j], chars[i]
+	})
+
 	var b strings.Builder
 	for i := 0; i < n; i++ {
-		b.WriteByte(markerChars[i%len(markerChars)])
+		// Cycle through shuffled set, re-shuffle each full cycle for variety.
+		idx := i % len(chars)
+		if idx == 0 && i > 0 {
+			rng.Shuffle(len(chars), func(a, c int) {
+				chars[a], chars[c] = chars[c], chars[a]
+			})
+		}
+		b.WriteByte(chars[idx])
 	}
 	return b.String()
+}
+
+// isTimestampRange checks if s looks like a timestamp range (contains ':' and '-'
+// in a pattern like "HH:MM-HH:MM" or "YYYY-MM-DDTHH:MM-YYYY-MM-DDTHH:MM").
+func isTimestampRange(s string) bool {
+	parts := strings.SplitN(s, "-", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	return strings.Contains(parts[0], ":") && strings.Contains(parts[1], ":")
+}
+
+// filterByTimestampRange returns indices of intervals whose time portion falls
+// within the given range string "start-end". Comparison is lexicographic on
+// the time portion (after 'T').
+func filterByTimestampRange(intervals []string, zoomRange string) []int {
+	parts := strings.SplitN(zoomRange, "-", 2)
+	if len(parts) != 2 {
+		return nil
+	}
+	lo, hi := parts[0], parts[1]
+
+	var indices []int
+	for i, iv := range intervals {
+		timePart := iv
+		if tIdx := strings.IndexByte(iv, 'T'); tIdx >= 0 {
+			timePart = iv[tIdx+1:]
+		}
+		if timePart >= lo && timePart <= hi {
+			indices = append(indices, i)
+		}
+	}
+	return indices
+}
+
+// filterByMarkerSubstring finds the marker substring in the full marker string
+// and returns the corresponding interval indices.
+func filterByMarkerSubstring(markers, sub string) []int {
+	idx := strings.Index(markers, sub)
+	if idx < 0 {
+		return nil
+	}
+	indices := make([]int, len(sub))
+	for i := range sub {
+		indices[i] = idx + i
+	}
+	return indices
 }
 
 // formatLegend builds lines mapping each marker character to its interval timestamp.
